@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
 
 	"github.com/Herrscherd/herrscher-contracts"
 )
@@ -53,10 +55,26 @@ func New(root string) (*ObsidianMemory, error) {
 
 // flock takes the exclusive cross-process lock and returns its release func. The
 // in-process mutex must already be held so the lock is taken at most once per
-// process at a time. Callers defer the returned func.
-func (m *ObsidianMemory) flock() func() {
-	_ = lockFD(m.lockFile.Fd())
-	return func() { _ = unlockFD(m.lockFile.Fd()) }
+// process at a time. It polls the non-blocking lock so a stuck peer cannot pin
+// the call past ctx; on timeout or a real lock error it logs and proceeds
+// best-effort (the in-process mutex still serializes this process). Callers
+// defer the returned func.
+func (m *ObsidianMemory) flock(ctx context.Context) func() {
+	for {
+		err := lockFD(m.lockFile.Fd())
+		if err == nil {
+			return func() { _ = unlockFD(m.lockFile.Fd()) }
+		}
+		if err != syscall.EWOULDBLOCK {
+			fmt.Fprintf(os.Stderr, "obsidian: vault lock: %v\n", err)
+			return func() {}
+		}
+		select {
+		case <-ctx.Done():
+			return func() {}
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 }
 
 func (m *ObsidianMemory) loadUnlocked(key string) (contracts.Node, error) {
@@ -107,13 +125,19 @@ func (m *ObsidianMemory) Record(ctx context.Context, n contracts.Node) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	defer m.flock()()
+	defer m.flock(ctx)()
 	return m.recordUnlocked(n)
 }
 
 // Recall loads the root node and breadth-first follows its links up to depth.
+// It holds the in-process mutex and the cross-process lock for the whole walk so
+// a concurrent writer can't make it see a node mid-update or miss a just-written
+// one (every read goes through loadUnlocked under that lock).
 func (m *ObsidianMemory) Recall(ctx context.Context, key string, depth int) (contracts.Subgraph, error) {
-	root, err := m.load(key)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	defer m.flock(ctx)()
+	root, err := m.loadUnlocked(key)
 	if err != nil {
 		return contracts.Subgraph{}, err
 	}
@@ -136,7 +160,7 @@ func (m *ObsidianMemory) Recall(ctx context.Context, key string, depth int) (con
 					continue
 				}
 				seen[l.To] = true
-				child, err := m.load(l.To)
+				child, err := m.loadUnlocked(l.To)
 				if err != nil {
 					continue // dangling link: skip, do not fail the whole recall
 				}
@@ -159,7 +183,7 @@ func (m *ObsidianMemory) Links(ctx context.Context, from, to, rel string) error 
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	defer m.flock()()
+	defer m.flock(ctx)()
 	n, err := m.loadUnlocked(from)
 	if err != nil {
 		return err
@@ -187,6 +211,7 @@ func (m *ObsidianMemory) Search(ctx context.Context, q contracts.Query) ([]contr
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	defer m.flock(ctx)()
 	fsys := m.root.FS()
 	var out []contracts.Node
 	err := fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
