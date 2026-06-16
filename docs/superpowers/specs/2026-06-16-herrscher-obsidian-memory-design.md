@@ -60,7 +60,7 @@ Four verbs, with no mention of files or Obsidian:
 Neutral types (exact Go shapes finalized in the plan):
 
 ```go
-type NodeKind string // Project, Architecture, Production, Session, Decision, User
+type NodeKind string // Organization, Project, Repo, Server, Architecture, Production, Session, Decision, User
 
 type Node struct {
     Key   string            // stable identity (vault-relative path in the Obsidian impl)
@@ -104,21 +104,59 @@ rather than create a duplicate").
 - `Search` (first slice): frontmatter/tag/kind filter + full-text substring over the
   vault. No vector index yet — that is a different Memory plugin later.
 
-### 4.1 The 6 node kinds (templates)
+### 4.1 Hierarchy (nestable)
 
-| Kind          | Purpose                                                       | Lives at                              |
-|---------------|---------------------------------------------------------------|---------------------------------------|
-| `Project`     | Root node per project; state + links to its key files & deps  | `projets/<name>/index.md`             |
-| `Architecture`| Frozen architecture decisions (living doc, read first)        | `projets/<name>/architecture.md`      |
-| `Production`  | Deploy/prod state                                             | `projets/<name>/production.md`         |
-| `Session`     | One work session: date, what was done, decisions, files (a **summary**, not a transcript) | `sessions/YYYY-MM-DD-<slug>.md` |
-| `Decision`    | One ADR: context, choice, reason, rejected alternatives; reusable cross-project | `decisions/<slug>.md`        |
-| `User`        | Model of the user — identity, work preferences, interaction style; cross-cutting & evolving, **not** dated/factual | `user/<slug>.md` |
+The mapping is **not** flat. The default at creation is `1 repo = 1 project = 1
+Obsidian folder`, but it is only a default — creation is free and the structure
+nests:
 
+```
+Organization   (edge + its servers; or a vendor/domain)   — optional, not every project has one
+   └─ Project   (Takt — the unit of work; may aggregate N repos)
+        ├─ Repo    (the 8 Takt repos: core + 7 wrappers)
+        └─ Server  (the N servers edge manages)
+```
+
+A `Project` is the unit of work; it maps to one repo by default but can aggregate
+several (Takt = one project, eight repos). `Organization` is an optional tier above
+projects for complex real setups (edge managing multiple servers). `Repo` and
+`Server` are first-class nodes so the agent can grave decisions/sessions specific to
+one repo or one server, linked back to their project.
+
+### 4.2 The 9 node kinds (templates)
+
+| Kind           | Purpose                                                       | Lives at                                   |
+|----------------|---------------------------------------------------------------|--------------------------------------------|
+| `Organization` | Optional top grouping; links to its projects & topology       | `<org>/index.md`                           |
+| `Project`      | Root node per project; state + links to repos/servers & deps  | `[<org>/]<project>/index.md`               |
+| `Repo`         | One code repository under a project                           | `[<org>/]<project>/repos/<repo>.md`        |
+| `Server`       | One server/host under a project or org                        | `[<org>/]<project>/servers/<server>.md`    |
+| `Architecture` | Frozen architecture decisions (living doc, read first)        | `…/<project>/architecture.md`              |
+| `Production`   | Deploy/prod state                                             | `…/<project>/production.md`                |
+| `Session`      | One work session: date, what was done, decisions, files (a **summary**, not a transcript) | `sessions/YYYY-MM-DD-<slug>.md` |
+| `Decision`     | One ADR: context, choice, reason, rejected alternatives; reusable cross-project | `decisions/<slug>.md`     |
+| `User`         | Model of the user — identity, work preferences, interaction style; cross-cutting & evolving, **not** dated/factual | `user/<slug>.md` |
+
+`Organization`/`Project`/`Repo`/`Server` form the structural spine.
 `Project`/`Session`/`Decision` are factual and dated ("what happened"). `User` is
 cross-cutting and evolving ("who you are, applies everywhere"). A `User` preference
 is a node **linked** to the projects/decisions it applies to, so a `Recall` of a
 project surfaces the user's way of working via the edge.
+
+### 4.3 `init` — the scaffolder (must be rock-solid)
+
+`init` creates the base files for a new org/project/repo/server from the templates
+above. Requirements:
+
+- **Idempotent**: re-running `init` on an existing target never overwrites or
+  destroys existing content — it only fills in what's missing.
+- **Structure-guaranteed**: produces the canonical layout (frontmatter `type:`,
+  required links wired, dated where relevant) so every node is well-formed for
+  Recall/Search from creation.
+- **Free nesting**: target can be a bare project (`projets/<name>/`) or nested under
+  an org (`<org>/<project>/`); `init` creates intermediate nodes (the org/project
+  `index.md`) if absent and links children to parents.
+- Surfaced as a plugin entry point (callable by the host/CLI), not a passive write.
 
 ## 5. The nudge (curation seam — defined, NOT implemented)
 
@@ -137,6 +175,21 @@ drive — so that:
 
 No host-side loop, no scheduler, no auto-write in this slice. Just the seam.
 
+### 4.4 Golden example — the reference vault (dogfood: Herrscher)
+
+A reference vault is committed in the repo (e.g. `examples/vault/`) modelling
+**Herrscher itself**: org `Herrscherd` → project `Herrscher` → repos `contracts`,
+`discord-gateway`, `claude-backend`, `obsidian-memory`, plus an `architecture.md`,
+sample `Session` and `Decision` nodes, and a `User` node. It exercises the
+Organization → Project → Repo spine on real, always-current architecture.
+
+It serves three roles: (1) living documentation of "what good looks like", (2) the
+**test fixture** for Recall/Search/Links round-trips, (3) the canonical output shape
+`init` must reproduce. `init` run against an empty dir must converge to this shape.
+
+`Server` is not exercised by the Herrscher vault (repo-centric); it is covered by the
+templates and a dedicated unit test so the kind stays well-formed.
+
 ## 6. Scope
 
 **In scope (this slice):**
@@ -144,8 +197,11 @@ No host-side loop, no scheduler, no auto-write in this slice. Just the seam.
    `Registry.Memories()` in `herrscher-contracts`.
 2. `herrscher-obsidian-memory` plugin: implements Recall/Record/Search/Links over a
    markdown vault; self-registers in `init()`; parses/emits frontmatter + wikilinks;
-   templates for all 6 node kinds (incl. `User`).
-3. The curation seam: defined as an interface/hook, documented, not implemented.
+   templates for all 9 node kinds (incl. `Organization`, `Repo`, `Server`, `User`);
+   supports the nestable Organization → Project → Repo/Server hierarchy.
+3. The `init` scaffolder: idempotent, structure-guaranteed, free nesting (§4.3).
+4. The golden example vault (dogfood: Herrscher) as living doc + test fixture (§4.4).
+5. The curation seam: defined as an interface/hook, documented, not implemented.
 
 **Out of scope:**
 - The curation loop implementation (Orchestrator owns it).
