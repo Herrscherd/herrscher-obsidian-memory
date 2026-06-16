@@ -10,6 +10,8 @@ import (
 	"github.com/Herrscherd/herrscher-contracts"
 )
 
+var errEmptyProject = fmt.Errorf("obsidian: Init needs a Project name")
+
 // ObsidianMemory implements contracts.Memory over a markdown vault rooted at root.
 type ObsidianMemory struct {
 	root string
