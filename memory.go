@@ -73,14 +73,17 @@ func (m *ObsidianMemory) load(key string) (contracts.Node, error) {
 
 // Record upserts a node: keyToRel is deterministic, so writing the same Key
 // overwrites the same file (update in place, no duplicate).
-func (m *ObsidianMemory) Record(_ context.Context, n contracts.Node) error {
+func (m *ObsidianMemory) Record(ctx context.Context, n contracts.Node) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.recordUnlocked(n)
 }
 
 // Recall loads the root node and breadth-first follows its links up to depth.
-func (m *ObsidianMemory) Recall(_ context.Context, key string, depth int) (contracts.Subgraph, error) {
+func (m *ObsidianMemory) Recall(ctx context.Context, key string, depth int) (contracts.Subgraph, error) {
 	root, err := m.load(key)
 	if err != nil {
 		return contracts.Subgraph{}, err
@@ -90,6 +93,9 @@ func (m *ObsidianMemory) Recall(_ context.Context, key string, depth int) (contr
 	edges := map[contracts.Link]bool{}
 	frontier := []contracts.Node{root}
 	for d := 0; d < depth && len(frontier) > 0; d++ {
+		if err := ctx.Err(); err != nil {
+			return contracts.Subgraph{}, err
+		}
 		var next []contracts.Node
 		for _, n := range frontier {
 			for _, l := range n.Links {
@@ -118,7 +124,10 @@ func (m *ObsidianMemory) Recall(_ context.Context, key string, depth int) (contr
 // It is idempotent on the target: if an edge to `to` already exists it is left
 // untouched (the vault document owns the relation label, since a human co-edits
 // it), so re-linking with a different rel does not rewrite their prose.
-func (m *ObsidianMemory) Links(_ context.Context, from, to, rel string) error {
+func (m *ObsidianMemory) Links(ctx context.Context, from, to, rel string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	n, err := m.loadUnlocked(from)
@@ -137,13 +146,19 @@ func (m *ObsidianMemory) Links(_ context.Context, from, to, rel string) error {
 // Close releases the vault root handle.
 func (m *ObsidianMemory) Close() error { return m.root.Close() }
 
-func (m *ObsidianMemory) Search(_ context.Context, q contracts.Query) ([]contracts.Node, error) {
+func (m *ObsidianMemory) Search(ctx context.Context, q contracts.Query) ([]contracts.Node, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	fsys := m.root.FS()
 	var out []contracts.Node
 	err := fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if !d.Type().IsRegular() || !strings.HasSuffix(path, ".md") {

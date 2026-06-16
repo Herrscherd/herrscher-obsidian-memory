@@ -87,7 +87,10 @@ func (m *ObsidianMemory) Init(ctx context.Context, s InitSpec) error {
 
 // ensure Records the node only if its file does not already exist. The existence
 // check and the write are atomic under the same lock Record uses.
-func (m *ObsidianMemory) ensure(_ context.Context, n contracts.Node) error {
+func (m *ObsidianMemory) ensure(ctx context.Context, n contracts.Node) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, err := m.root.Stat(keyToRel(n.Key)); err == nil {

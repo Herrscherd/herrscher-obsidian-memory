@@ -153,6 +153,21 @@ func TestLinksKeepsExistingRelOnTarget(t *testing.T) {
 	}
 }
 
+func TestCancelledContextIsHonored(t *testing.T) {
+	m := newTestMem(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := m.Record(ctx, contracts.Node{Key: "a", Kind: contracts.KindProject}); err == nil {
+		t.Fatalf("Record should respect a cancelled context")
+	}
+	if _, err := m.Search(ctx, contracts.Query{}); err == nil {
+		t.Fatalf("Search should respect a cancelled context")
+	}
+	if err := m.Links(ctx, "a", "b", "contains"); err == nil {
+		t.Fatalf("Links should respect a cancelled context")
+	}
+}
+
 func TestSearchIgnoresSymlinkEscape(t *testing.T) {
 	dir := t.TempDir()
 	m, err := New(dir)
