@@ -73,3 +73,29 @@ func TestRecallMissingKeyErrors(t *testing.T) {
 		t.Fatalf("expected error recalling missing key")
 	}
 }
+
+func TestSearchByKindTagText(t *testing.T) {
+	m := newTestMem(t)
+	ctx := context.Background()
+	_ = m.Record(ctx, contracts.Node{Key: "a/index", Kind: contracts.KindProject,
+		Title: "Alpha", Body: "uses NATS", Meta: map[string]string{"tags": "platform, go"}})
+	_ = m.Record(ctx, contracts.Node{Key: "dec/x", Kind: contracts.KindDecision,
+		Title: "Choose NATS", Body: "transport choice"})
+
+	byKind, _ := m.Search(ctx, contracts.Query{Kinds: []contracts.NodeKind{contracts.KindDecision}})
+	if len(byKind) != 1 || byKind[0].Key != "dec/x" {
+		t.Fatalf("kind filter wrong: %+v", byKind)
+	}
+	byText, _ := m.Search(ctx, contracts.Query{Text: "nats"})
+	if len(byText) != 2 {
+		t.Fatalf("text filter expected 2, got %d", len(byText))
+	}
+	byTag, _ := m.Search(ctx, contracts.Query{Tags: []string{"go"}})
+	if len(byTag) != 1 || byTag[0].Key != "a/index" {
+		t.Fatalf("tag filter wrong: %+v", byTag)
+	}
+	lim, _ := m.Search(ctx, contracts.Query{Text: "nats", Limit: 1})
+	if len(lim) != 1 {
+		t.Fatalf("limit not honored: %d", len(lim))
+	}
+}

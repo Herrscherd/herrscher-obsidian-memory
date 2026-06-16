@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/Herrscherd/herrscher-contracts"
 )
@@ -82,3 +83,65 @@ func (m *ObsidianMemory) Recall(_ context.Context, key string, depth int) (contr
 
 // Close is a no-op: the vault is plain files with nothing to release.
 func (m *ObsidianMemory) Close() error { return nil }
+
+func (m *ObsidianMemory) Search(_ context.Context, q contracts.Query) ([]contracts.Node, error) {
+	var out []contracts.Node
+	err := filepath.Walk(m.root, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return err
+		}
+		key := pathToKey(m.root, path)
+		if key == "" {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		n := unmarshalNode(key, data)
+		if matchesQuery(n, q) {
+			out = append(out, n)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("obsidian: search: %w", err)
+	}
+	if q.Limit > 0 && len(out) > q.Limit {
+		out = out[:q.Limit]
+	}
+	return out, nil
+}
+
+func matchesQuery(n contracts.Node, q contracts.Query) bool {
+	if len(q.Kinds) > 0 {
+		ok := false
+		for _, k := range q.Kinds {
+			if n.Kind == k {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return false
+		}
+	}
+	if q.Text != "" {
+		hay := strings.ToLower(n.Title + "\n" + n.Body)
+		if !strings.Contains(hay, strings.ToLower(q.Text)) {
+			return false
+		}
+	}
+	if len(q.Tags) > 0 {
+		tags := map[string]bool{}
+		for _, t := range strings.Split(n.Meta["tags"], ",") {
+			tags[strings.TrimSpace(strings.ToLower(t))] = true
+		}
+		for _, want := range q.Tags {
+			if !tags[strings.ToLower(want)] {
+				return false
+			}
+		}
+	}
+	return true
+}
