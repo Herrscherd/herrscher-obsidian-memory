@@ -42,9 +42,20 @@ func (m *ObsidianMemory) Init(ctx context.Context, s InitSpec) error {
 	}
 
 	projKey := base + "/index"
-	projLinks := []contracts.Link{}
+	var projLinks []contracts.Link
 	if s.Org != "" {
 		projLinks = append(projLinks, contracts.Link{To: s.Org + "/index", Rel: "belongs-to"})
+	}
+	// The project node links down to every child so Recall(project) surfaces the
+	// whole spine; children also link back up (belongs-to) below.
+	projLinks = append(projLinks,
+		contracts.Link{To: base + "/architecture", Rel: "contains"},
+		contracts.Link{To: base + "/production", Rel: "contains"})
+	for _, r := range s.Repos {
+		projLinks = append(projLinks, contracts.Link{To: base + "/repos/" + r, Rel: "contains"})
+	}
+	for _, sv := range s.Servers {
+		projLinks = append(projLinks, contracts.Link{To: base + "/servers/" + sv, Rel: "contains"})
 	}
 	if err := m.ensure(ctx, contracts.Node{Key: projKey, Kind: contracts.KindProject,
 		Title: s.Project, Links: projLinks}); err != nil {

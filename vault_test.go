@@ -44,6 +44,38 @@ func TestMarshalUnmarshalRoundTrip(t *testing.T) {
 	}
 }
 
+func TestFrontmatterValuesCannotBreakOut(t *testing.T) {
+	n := contracts.Node{
+		Key:   "x",
+		Kind:  contracts.KindUser,
+		Title: "evil\n---\ntype: project\nsecret: pwned",
+		Meta:  map[string]string{"note": "line1\nline2", "type": "hijack"},
+	}
+	got := unmarshalNode("x", []byte(marshalNode(n)))
+	if got.Kind != contracts.KindUser {
+		t.Fatalf("Kind hijacked via injection/Meta: %s", got.Kind)
+	}
+	if _, ok := got.Meta["secret"]; ok {
+		t.Fatalf("frontmatter break-out injected a key: %+v", got.Meta)
+	}
+	if got.Title != "evil --- type: project secret: pwned" {
+		t.Fatalf("title not single-lined: %q", got.Title)
+	}
+}
+
+func TestReRecordDoesNotDuplicateLiensHeader(t *testing.T) {
+	body := "hi\n\n" + liensHeader + "\n- [[a|r]]\n"
+	n := contracts.Node{Key: "x", Kind: contracts.KindRepo, Body: body,
+		Links: []contracts.Link{{To: "a", Rel: "r"}, {To: "b", Rel: "q"}}}
+	out := marshalNode(n)
+	if strings.Count(out, liensHeader) != 1 {
+		t.Fatalf("duplicate links header:\n%s", out)
+	}
+	if !strings.Contains(out, "[[b|q]]") {
+		t.Fatalf("new link not appended:\n%s", out)
+	}
+}
+
 func TestUnmarshalNoFrontmatter(t *testing.T) {
 	got := unmarshalNode("loose/note", []byte("just a body, no fences\n"))
 	if got.Key != "loose/note" || got.Body == "" {

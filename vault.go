@@ -12,20 +12,29 @@ var wikilinkRe = regexp.MustCompile(`\[\[([^\]|]+)(?:\|([^\]]+))?\]\]`)
 
 const liensHeader = "## Liens"
 
+// frontValue keeps a frontmatter scalar on a single line so a value can never
+// inject extra keys or a closing "---" fence.
+func frontValue(s string) string {
+	return strings.NewReplacer("\r", " ", "\n", " ").Replace(s)
+}
+
 func marshalNode(n contracts.Node) string {
 	var b strings.Builder
 	b.WriteString("---\n")
 	b.WriteString("type: " + string(n.Kind) + "\n")
 	if n.Title != "" {
-		b.WriteString("title: " + n.Title + "\n")
+		b.WriteString("title: " + frontValue(n.Title) + "\n")
 	}
 	keys := make([]string, 0, len(n.Meta))
 	for k := range n.Meta {
+		if k == "type" || k == "title" {
+			continue // reserved for Kind/Title — never let Meta shadow them
+		}
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		b.WriteString(k + ": " + n.Meta[k] + "\n")
+		b.WriteString(k + ": " + frontValue(n.Meta[k]) + "\n")
 	}
 	b.WriteString("---\n")
 
@@ -50,7 +59,10 @@ func marshalNode(n contracts.Node) string {
 		if !strings.HasSuffix(body, "\n") {
 			b.WriteString("\n")
 		}
-		b.WriteString("\n" + liensHeader + "\n" + strings.Join(missing, "\n") + "\n")
+		if !strings.Contains(body, liensHeader) {
+			b.WriteString("\n" + liensHeader + "\n")
+		}
+		b.WriteString(strings.Join(missing, "\n") + "\n")
 	}
 	return b.String()
 }

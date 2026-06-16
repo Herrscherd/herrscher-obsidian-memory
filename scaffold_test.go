@@ -42,6 +42,28 @@ func TestInitScaffoldsHierarchy(t *testing.T) {
 	}
 }
 
+func TestInitProjectReachesChildrenViaRecall(t *testing.T) {
+	m := newTestMem(t)
+	ctx := context.Background()
+	spec := InitSpec{Org: "org", Project: "proj", Repos: []string{"r1"}, Servers: []string{"s1"}}
+	if err := m.Init(ctx, spec); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	sg, err := m.Recall(ctx, "org/proj/index", 1)
+	if err != nil {
+		t.Fatalf("Recall: %v", err)
+	}
+	reached := map[string]bool{}
+	for _, n := range sg.Nodes {
+		reached[n.Key] = true
+	}
+	for _, want := range []string{"org/proj/architecture", "org/proj/production", "org/proj/repos/r1", "org/proj/servers/s1"} {
+		if !reached[want] {
+			t.Fatalf("Recall(project) did not reach %q: %v", want, reached)
+		}
+	}
+}
+
 func TestInitIsIdempotentAndNeverOverwrites(t *testing.T) {
 	m := newTestMem(t)
 	ctx := context.Background()
