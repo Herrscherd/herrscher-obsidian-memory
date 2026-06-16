@@ -2,8 +2,11 @@ package obsidian
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Herrscherd/herrscher-contracts"
@@ -165,6 +168,62 @@ func TestCancelledContextIsHonored(t *testing.T) {
 	}
 	if err := m.Links(ctx, "a", "b", "contains"); err == nil {
 		t.Fatalf("Links should respect a cancelled context")
+	}
+}
+
+func TestRecordIsAtomicNoTempLeftBehind(t *testing.T) {
+	dir := t.TempDir()
+	m, err := New(dir)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx := context.Background()
+	if err := m.Record(ctx, contracts.Node{Key: "a/b", Kind: contracts.KindRepo, Title: "T"}); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "a", "b.md.tmp")); !os.IsNotExist(err) {
+		t.Fatalf("temp file left behind after Record: err=%v", err)
+	}
+	n, err := m.load("a/b")
+	if err != nil || n.Title != "T" {
+		t.Fatalf("node not committed cleanly: %+v err=%v", n, err)
+	}
+}
+
+func TestVaultLockFileIsHiddenFromSearch(t *testing.T) {
+	dir := t.TempDir()
+	m, err := New(dir)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, lockName)); err != nil {
+		t.Fatalf("lock file not created: %v", err)
+	}
+	_ = m.Record(context.Background(), contracts.Node{Key: "x", Kind: contracts.KindProject, Body: "lock"})
+	res, _ := m.Search(context.Background(), contracts.Query{Text: "lock"})
+	for _, n := range res {
+		if strings.Contains(n.Key, lockName) {
+			t.Fatalf("Search surfaced the lock file: %+v", res)
+		}
+	}
+}
+
+func TestConcurrentLinksAllLand(t *testing.T) {
+	m := newTestMem(t)
+	ctx := context.Background()
+	_ = m.Record(ctx, contracts.Node{Key: "a", Kind: contracts.KindProject})
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_ = m.Links(ctx, "a", fmt.Sprintf("b%d", i), "contains")
+		}(i)
+	}
+	wg.Wait()
+	n, _ := m.load("a")
+	if len(n.Links) != 16 {
+		t.Fatalf("want 16 edges after concurrent Links, got %d", len(n.Links))
 	}
 }
 

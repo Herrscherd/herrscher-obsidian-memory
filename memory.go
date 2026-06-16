@@ -15,12 +15,20 @@ import (
 	"github.com/Herrscherd/herrscher-contracts"
 )
 
+// lockName is the advisory cross-process lock file kept at the vault root. It is
+// a hidden non-markdown file, so Obsidian, git, and Search all ignore it.
+const lockName = ".herrscher.lock"
+
 // ObsidianMemory implements contracts.Memory over a markdown vault. All file I/O
 // goes through an *os.Root so a malicious key or an in-vault symlink can never
-// escape the root. A mutex serializes writes (Links is read-modify-write).
+// escape the root. The mutex serializes writes within this process; lockFile
+// serializes them across processes (the daemon spawns one bridge subprocess per
+// session, all sharing the same vault), and every write lands atomically via a
+// temp file + rename so a vault never sees a torn document.
 type ObsidianMemory struct {
-	mu   sync.Mutex
-	root *os.Root
+	mu       sync.Mutex
+	root     *os.Root
+	lockFile *os.File
 }
 
 // New opens (creating if absent) a vault directory and returns a Memory over it.
@@ -35,7 +43,20 @@ func New(root string) (*ObsidianMemory, error) {
 	if err != nil {
 		return nil, fmt.Errorf("obsidian: open vault root: %w", err)
 	}
-	return &ObsidianMemory{root: r}, nil
+	lf, err := r.OpenFile(lockName, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		r.Close()
+		return nil, fmt.Errorf("obsidian: open vault lock: %w", err)
+	}
+	return &ObsidianMemory{root: r, lockFile: lf}, nil
+}
+
+// flock takes the exclusive cross-process lock and returns its release func. The
+// in-process mutex must already be held so the lock is taken at most once per
+// process at a time. Callers defer the returned func.
+func (m *ObsidianMemory) flock() func() {
+	_ = lockFD(m.lockFile.Fd())
+	return func() { _ = unlockFD(m.lockFile.Fd()) }
 }
 
 func (m *ObsidianMemory) loadUnlocked(key string) (contracts.Node, error) {
@@ -59,8 +80,15 @@ func (m *ObsidianMemory) recordUnlocked(n contracts.Node) error {
 			return fmt.Errorf("obsidian: mkdir for %q: %w", n.Key, err)
 		}
 	}
-	if err := m.root.WriteFile(rel, []byte(marshalNode(n)), 0o644); err != nil {
+	// Write to a temp sibling then rename: rename is atomic on a POSIX
+	// filesystem, so a reader (or a crash) never observes a half-written node.
+	tmp := rel + ".tmp"
+	if err := m.root.WriteFile(tmp, []byte(marshalNode(n)), 0o644); err != nil {
 		return fmt.Errorf("obsidian: write %q: %w", n.Key, err)
+	}
+	if err := m.root.Rename(tmp, rel); err != nil {
+		_ = m.root.Remove(tmp)
+		return fmt.Errorf("obsidian: commit %q: %w", n.Key, err)
 	}
 	return nil
 }
@@ -79,6 +107,7 @@ func (m *ObsidianMemory) Record(ctx context.Context, n contracts.Node) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	defer m.flock()()
 	return m.recordUnlocked(n)
 }
 
@@ -130,6 +159,7 @@ func (m *ObsidianMemory) Links(ctx context.Context, from, to, rel string) error 
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	defer m.flock()()
 	n, err := m.loadUnlocked(from)
 	if err != nil {
 		return err
@@ -143,8 +173,13 @@ func (m *ObsidianMemory) Links(ctx context.Context, from, to, rel string) error 
 	return m.recordUnlocked(n)
 }
 
-// Close releases the vault root handle.
-func (m *ObsidianMemory) Close() error { return m.root.Close() }
+// Close releases the vault lock and root handle.
+func (m *ObsidianMemory) Close() error {
+	if m.lockFile != nil {
+		_ = m.lockFile.Close()
+	}
+	return m.root.Close()
+}
 
 func (m *ObsidianMemory) Search(ctx context.Context, q contracts.Query) ([]contracts.Node, error) {
 	if err := ctx.Err(); err != nil {
