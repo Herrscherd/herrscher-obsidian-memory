@@ -99,3 +99,42 @@ func TestSearchByKindTagText(t *testing.T) {
 		t.Fatalf("limit not honored: %d", len(lim))
 	}
 }
+
+func TestLinksCreatesEdgeVisibleToRecall(t *testing.T) {
+	m := newTestMem(t)
+	ctx := context.Background()
+	_ = m.Record(ctx, contracts.Node{Key: "a", Kind: contracts.KindProject})
+	_ = m.Record(ctx, contracts.Node{Key: "b", Kind: contracts.KindRepo})
+
+	if err := m.Links(ctx, "a", "b", "contains"); err != nil {
+		t.Fatalf("Links: %v", err)
+	}
+	sg, _ := m.Recall(ctx, "a", 1)
+	found := false
+	for _, n := range sg.Nodes {
+		if n.Key == "b" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("edge a→b not visible via Recall: %+v", sg)
+	}
+}
+
+func TestLinksIsIdempotent(t *testing.T) {
+	m := newTestMem(t)
+	ctx := context.Background()
+	_ = m.Record(ctx, contracts.Node{Key: "a", Kind: contracts.KindProject})
+	_ = m.Links(ctx, "a", "b", "contains")
+	_ = m.Links(ctx, "a", "b", "contains")
+	n, _ := m.load("a")
+	count := 0
+	for _, l := range n.Links {
+		if l.To == "b" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("duplicate edge created: %d", count)
+	}
+}

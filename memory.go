@@ -81,6 +81,23 @@ func (m *ObsidianMemory) Recall(_ context.Context, key string, depth int) (contr
 	return sg, nil
 }
 
+// Links adds a typed edge from→to. It loads the source node, appends the link if
+// absent (idempotent), and re-Records it. The edge then appears in the source's
+// body as a [[to|rel]] wikilink.
+func (m *ObsidianMemory) Links(ctx context.Context, from, to, rel string) error {
+	n, err := m.load(from)
+	if err != nil {
+		return err
+	}
+	for _, l := range n.Links {
+		if l.To == to {
+			return nil // already linked
+		}
+	}
+	n.Links = append(n.Links, contracts.Link{To: to, Rel: rel})
+	return m.Record(ctx, n)
+}
+
 // Close is a no-op: the vault is plain files with nothing to release.
 func (m *ObsidianMemory) Close() error { return nil }
 
