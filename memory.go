@@ -29,6 +29,9 @@ func New(root string) (*ObsidianMemory, error) {
 }
 
 func (m *ObsidianMemory) load(key string) (contracts.Node, error) {
+	if err := validKey(key); err != nil {
+		return contracts.Node{}, err
+	}
 	data, err := os.ReadFile(keyToPath(m.root, key))
 	if err != nil {
 		return contracts.Node{}, fmt.Errorf("obsidian: load %q: %w", key, err)
@@ -39,8 +42,8 @@ func (m *ObsidianMemory) load(key string) (contracts.Node, error) {
 // Record upserts a node: keyToPath is deterministic, so writing the same Key
 // overwrites the same file (update in place, no duplicate).
 func (m *ObsidianMemory) Record(_ context.Context, n contracts.Node) error {
-	if n.Key == "" {
-		return fmt.Errorf("obsidian: Record needs a Key")
+	if err := validKey(n.Key); err != nil {
+		return err
 	}
 	path := keyToPath(m.root, n.Key)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

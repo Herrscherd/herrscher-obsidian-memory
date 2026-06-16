@@ -22,3 +22,16 @@ func TestPathToKeyRejectsNonMarkdown(t *testing.T) {
 		t.Fatalf("pathToKey on non-.md should be empty, got %q", k)
 	}
 }
+
+func TestValidKeyRejectsTraversal(t *testing.T) {
+	for _, bad := range []string{"", "..", "../escape", "a/../../b", "/abs/path", "a//b", "a/./b"} {
+		if err := validKey(bad); err == nil {
+			t.Fatalf("validKey(%q) should be rejected", bad)
+		}
+	}
+	for _, ok := range []string{"a", "a/b/c", "herrscher/repos/contracts"} {
+		if err := validKey(ok); err != nil {
+			t.Fatalf("validKey(%q) should be allowed: %v", ok, err)
+		}
+	}
+}

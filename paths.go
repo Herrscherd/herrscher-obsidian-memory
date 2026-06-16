@@ -4,9 +4,27 @@
 package obsidian
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 )
+
+// validKey rejects keys that would escape the vault root or are malformed: empty,
+// absolute, or containing "." / ".." / empty path segments.
+func validKey(key string) error {
+	if key == "" {
+		return fmt.Errorf("obsidian: empty key")
+	}
+	if filepath.IsAbs(key) {
+		return fmt.Errorf("obsidian: absolute key %q", key)
+	}
+	for _, p := range strings.Split(key, "/") {
+		if p == "" || p == "." || p == ".." {
+			return fmt.Errorf("obsidian: unsafe key %q", key)
+		}
+	}
+	return nil
+}
 
 // keyToPath maps a vault-relative key ("a/b/c") to its on-disk .md file.
 func keyToPath(root, key string) string {
