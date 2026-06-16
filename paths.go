@@ -1,6 +1,3 @@
-// Package obsidian implements the contracts.Memory port over an Obsidian-style
-// markdown vault: one node per .md file, frontmatter for Meta, [[wikilinks]] for
-// Links. The vault is a git-versioned folder; Obsidian is the human UI over it.
 package obsidian
 
 import (
@@ -28,9 +25,14 @@ func validKey(key string) error {
 
 // keyToPath maps a vault-relative key ("a/b/c") to its on-disk .md file.
 func keyToPath(root, key string) string {
+	return filepath.Join(root, keyToRel(key))
+}
+
+// keyToRel maps a key to its vault-relative .md path (for *os.Root operations).
+func keyToRel(key string) string {
 	parts := strings.Split(key, "/")
 	parts[len(parts)-1] += ".md"
-	return filepath.Join(append([]string{root}, parts...)...)
+	return filepath.Join(parts...)
 }
 
 // pathToKey is the inverse: an absolute .md path under root → its key, or "" if

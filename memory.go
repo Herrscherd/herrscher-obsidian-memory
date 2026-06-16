@@ -1,20 +1,26 @@
+// Package obsidian implements the contracts.Memory port over an Obsidian-style
+// markdown vault: one node per .md file, frontmatter for Meta, [[wikilinks]] for
+// Links. The vault is a git-versioned folder; Obsidian is the human UI over it.
 package obsidian
 
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/Herrscherd/herrscher-contracts"
 )
 
-var errEmptyProject = fmt.Errorf("obsidian: Init needs a Project name")
-
-// ObsidianMemory implements contracts.Memory over a markdown vault rooted at root.
+// ObsidianMemory implements contracts.Memory over a markdown vault. All file I/O
+// goes through an *os.Root so a malicious key or an in-vault symlink can never
+// escape the root. A mutex serializes writes (Links is read-modify-write).
 type ObsidianMemory struct {
-	root string
+	mu   sync.Mutex
+	root *os.Root
 }
 
 // New opens (creating if absent) a vault directory and returns a Memory over it.
@@ -25,34 +31,52 @@ func New(root string) (*ObsidianMemory, error) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return nil, fmt.Errorf("obsidian: create vault root: %w", err)
 	}
-	return &ObsidianMemory{root: root}, nil
+	r, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, fmt.Errorf("obsidian: open vault root: %w", err)
+	}
+	return &ObsidianMemory{root: r}, nil
 }
 
-func (m *ObsidianMemory) load(key string) (contracts.Node, error) {
+func (m *ObsidianMemory) loadUnlocked(key string) (contracts.Node, error) {
 	if err := validKey(key); err != nil {
 		return contracts.Node{}, err
 	}
-	data, err := os.ReadFile(keyToPath(m.root, key))
+	data, err := m.root.ReadFile(keyToRel(key))
 	if err != nil {
 		return contracts.Node{}, fmt.Errorf("obsidian: load %q: %w", key, err)
 	}
 	return unmarshalNode(key, data), nil
 }
 
-// Record upserts a node: keyToPath is deterministic, so writing the same Key
-// overwrites the same file (update in place, no duplicate).
-func (m *ObsidianMemory) Record(_ context.Context, n contracts.Node) error {
+func (m *ObsidianMemory) recordUnlocked(n contracts.Node) error {
 	if err := validKey(n.Key); err != nil {
 		return err
 	}
-	path := keyToPath(m.root, n.Key)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("obsidian: mkdir for %q: %w", n.Key, err)
+	rel := keyToRel(n.Key)
+	if dir := filepath.Dir(rel); dir != "." {
+		if err := m.root.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("obsidian: mkdir for %q: %w", n.Key, err)
+		}
 	}
-	if err := os.WriteFile(path, []byte(marshalNode(n)), 0o644); err != nil {
+	if err := m.root.WriteFile(rel, []byte(marshalNode(n)), 0o644); err != nil {
 		return fmt.Errorf("obsidian: write %q: %w", n.Key, err)
 	}
 	return nil
+}
+
+func (m *ObsidianMemory) load(key string) (contracts.Node, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.loadUnlocked(key)
+}
+
+// Record upserts a node: keyToRel is deterministic, so writing the same Key
+// overwrites the same file (update in place, no duplicate).
+func (m *ObsidianMemory) Record(_ context.Context, n contracts.Node) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.recordUnlocked(n)
 }
 
 // Recall loads the root node and breadth-first follows its links up to depth.
@@ -63,12 +87,16 @@ func (m *ObsidianMemory) Recall(_ context.Context, key string, depth int) (contr
 	}
 	sg := contracts.Subgraph{Root: root}
 	seen := map[string]bool{key: true}
+	edges := map[contracts.Link]bool{}
 	frontier := []contracts.Node{root}
 	for d := 0; d < depth && len(frontier) > 0; d++ {
 		var next []contracts.Node
 		for _, n := range frontier {
 			for _, l := range n.Links {
-				sg.Edges = append(sg.Edges, l)
+				if !edges[l] {
+					edges[l] = true
+					sg.Edges = append(sg.Edges, l)
+				}
 				if seen[l.To] {
 					continue
 				}
@@ -86,11 +114,14 @@ func (m *ObsidianMemory) Recall(_ context.Context, key string, depth int) (contr
 	return sg, nil
 }
 
-// Links adds a typed edge from→to. It loads the source node, appends the link if
-// absent (idempotent), and re-Records it. The edge then appears in the source's
-// body as a [[to|rel]] wikilink.
-func (m *ObsidianMemory) Links(ctx context.Context, from, to, rel string) error {
-	n, err := m.load(from)
+// Links adds a typed edge from→to as a [[to|rel]] wikilink in the source's body.
+// It is idempotent on the target: if an edge to `to` already exists it is left
+// untouched (the vault document owns the relation label, since a human co-edits
+// it), so re-linking with a different rel does not rewrite their prose.
+func (m *ObsidianMemory) Links(_ context.Context, from, to, rel string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n, err := m.loadUnlocked(from)
 	if err != nil {
 		return err
 	}
@@ -100,27 +131,29 @@ func (m *ObsidianMemory) Links(ctx context.Context, from, to, rel string) error 
 		}
 	}
 	n.Links = append(n.Links, contracts.Link{To: to, Rel: rel})
-	return m.Record(ctx, n)
+	return m.recordUnlocked(n)
 }
 
-// Close is a no-op: the vault is plain files with nothing to release.
-func (m *ObsidianMemory) Close() error { return nil }
+// Close releases the vault root handle.
+func (m *ObsidianMemory) Close() error { return m.root.Close() }
 
 func (m *ObsidianMemory) Search(_ context.Context, q contracts.Query) ([]contracts.Node, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	fsys := m.root.FS()
 	var out []contracts.Node
-	err := filepath.Walk(m.root, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return err
-		}
-		key := pathToKey(m.root, path)
-		if key == "" {
-			return nil
-		}
-		data, err := os.ReadFile(path)
+	err := fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		n := unmarshalNode(key, data)
+		if !d.Type().IsRegular() || !strings.HasSuffix(path, ".md") {
+			return nil // skip dirs, symlinks, and non-markdown
+		}
+		data, err := fs.ReadFile(fsys, path)
+		if err != nil {
+			return err
+		}
+		n := unmarshalNode(strings.TrimSuffix(path, ".md"), data)
 		if matchesQuery(n, q) {
 			out = append(out, n)
 		}

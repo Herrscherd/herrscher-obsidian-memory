@@ -2,7 +2,7 @@ package obsidian
 
 import (
 	"context"
-	"os"
+	"fmt"
 
 	"github.com/Herrscherd/herrscher-contracts"
 )
@@ -29,7 +29,7 @@ func (s InitSpec) base() string {
 // (idempotent, never overwrites), and links children to their parents.
 func (m *ObsidianMemory) Init(ctx context.Context, s InitSpec) error {
 	if s.Project == "" {
-		return errEmptyProject
+		return fmt.Errorf("obsidian: Init needs a Project name")
 	}
 	base := s.base()
 
@@ -85,10 +85,13 @@ func (m *ObsidianMemory) Init(ctx context.Context, s InitSpec) error {
 	return nil
 }
 
-// ensure Records the node only if its file does not already exist.
-func (m *ObsidianMemory) ensure(ctx context.Context, n contracts.Node) error {
-	if _, err := os.Stat(keyToPath(m.root, n.Key)); err == nil {
+// ensure Records the node only if its file does not already exist. The existence
+// check and the write are atomic under the same lock Record uses.
+func (m *ObsidianMemory) ensure(_ context.Context, n contracts.Node) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, err := m.root.Stat(keyToRel(n.Key)); err == nil {
 		return nil // exists — never overwrite
 	}
-	return m.Record(ctx, n)
+	return m.recordUnlocked(n)
 }

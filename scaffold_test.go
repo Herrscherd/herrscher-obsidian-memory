@@ -2,7 +2,7 @@ package obsidian
 
 import (
 	"context"
-	"os"
+	"strings"
 	"testing"
 
 	"github.com/Herrscherd/herrscher-contracts"
@@ -71,25 +71,15 @@ func TestInitIsIdempotentAndNeverOverwrites(t *testing.T) {
 	if err := m.Init(ctx, spec); err != nil {
 		t.Fatalf("first Init: %v", err)
 	}
-	path := keyToPath(m.root, "projets/solo/index")
-	if err := os.WriteFile(path, []byte("---\ntype: project\n---\nHUMAN EDIT\n"), 0o644); err != nil {
+	rel := keyToRel("projets/solo/index")
+	if err := m.root.WriteFile(rel, []byte("---\ntype: project\n---\nHUMAN EDIT\n"), 0o644); err != nil {
 		t.Fatalf("hand edit: %v", err)
 	}
 	if err := m.Init(ctx, spec); err != nil {
 		t.Fatalf("second Init: %v", err)
 	}
-	got, _ := os.ReadFile(path)
-	if string(got) == "" || !contains(string(got), "HUMAN EDIT") {
+	got, _ := m.root.ReadFile(rel)
+	if !strings.Contains(string(got), "HUMAN EDIT") {
 		t.Fatalf("Init overwrote a human-edited file: %q", string(got))
 	}
-}
-
-func contains(s, sub string) bool { return len(s) >= len(sub) && (indexOf(s, sub) >= 0) }
-func indexOf(s, sub string) int {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
-		}
-	}
-	return -1
 }

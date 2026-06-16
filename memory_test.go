@@ -2,6 +2,8 @@ package obsidian
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/Herrscherd/herrscher-contracts"
@@ -136,5 +138,42 @@ func TestLinksIsIdempotent(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("duplicate edge created: %d", count)
+	}
+}
+
+func TestLinksKeepsExistingRelOnTarget(t *testing.T) {
+	m := newTestMem(t)
+	ctx := context.Background()
+	_ = m.Record(ctx, contracts.Node{Key: "a", Kind: contracts.KindProject})
+	_ = m.Links(ctx, "a", "b", "depends-on")
+	_ = m.Links(ctx, "a", "b", "contains") // same target — idempotent, no rewrite
+	n, _ := m.load("a")
+	if len(n.Links) != 1 || n.Links[0].To != "b" || n.Links[0].Rel != "depends-on" {
+		t.Fatalf("want one b/depends-on edge unchanged: %+v", n.Links)
+	}
+}
+
+func TestSearchIgnoresSymlinkEscape(t *testing.T) {
+	dir := t.TempDir()
+	m, err := New(dir)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx := context.Background()
+	_ = m.Record(ctx, contracts.Node{Key: "real", Kind: contracts.KindProject, Body: "inside"})
+
+	secret := filepath.Join(t.TempDir(), "secret.md")
+	if err := os.WriteFile(secret, []byte("---\ntype: user\n---\nTOP SECRET\n"), 0o644); err != nil {
+		t.Fatalf("write secret: %v", err)
+	}
+	if err := os.Symlink(secret, filepath.Join(dir, "leak.md")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	res, err := m.Search(ctx, contracts.Query{Text: "secret"})
+	if err != nil {
+		t.Fatalf("Search errored on a symlinked vault: %v", err)
+	}
+	if len(res) != 0 {
+		t.Fatalf("Search read through a symlink escaping the vault: %+v", res)
 	}
 }
