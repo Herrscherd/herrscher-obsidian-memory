@@ -267,6 +267,9 @@ func matchesQuery(n contracts.Node, q contracts.Query) bool {
 		for _, t := range strings.Split(n.Meta["tags"], ",") {
 			tags[strings.TrimSpace(strings.ToLower(t))] = true
 		}
+		if d := strings.TrimSpace(strings.ToLower(n.Meta["domain"])); d != "" {
+			tags[d] = true
+		}
 		for _, want := range q.Tags {
 			if !tags[strings.ToLower(want)] {
 				return false

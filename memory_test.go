@@ -251,3 +251,19 @@ func TestSearchIgnoresSymlinkEscape(t *testing.T) {
 		t.Fatalf("Search read through a symlink escaping the vault: %+v", res)
 	}
 }
+
+func TestSearchMatchesDomainAsTag(t *testing.T) {
+	m := newTestMem(t)
+	ctx := context.Background()
+	if err := m.Record(ctx, contracts.Node{Key: "projets/x/index", Kind: contracts.KindProject,
+		Title: "X", Meta: map[string]string{"domain": "dev"}}); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	got, err := m.Search(ctx, contracts.Query{Tags: []string{"dev"}})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(got) != 1 || got[0].Key != "projets/x/index" {
+		t.Fatalf("domain tag search did not find node: %+v", got)
+	}
+}
