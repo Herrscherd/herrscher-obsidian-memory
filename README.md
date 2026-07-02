@@ -9,7 +9,10 @@ it.
 
 `Organization → Project → Repo/Server` form the structural spine; `Architecture`,
 `Production`, `Session`, `Decision` are documentary; `User` models the user
-(cross-cutting, evolving).
+(cross-cutting, evolving); `Agent` anchors a durable companion's private memory.
+`Domain` (`dev`, `research`, …) is a transverse area-of-concern root that groups
+projects topically above the spine — set `InitSpec.Domain` to attach a project to
+one; the slug also lands in the project's `domain` frontmatter for tag search.
 
 ## Usage
 
