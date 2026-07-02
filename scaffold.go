@@ -8,9 +8,11 @@ import (
 )
 
 // InitSpec describes a project to scaffold. Org is optional; when empty the
-// project lives flat under "projets/<Project>".
+// project lives flat under "projets/<Project>". Domain is optional; when set it
+// attaches the project to a transverse domain root under "domaines/<Domain>".
 type InitSpec struct {
 	Org     string
+	Domain  string
 	Project string
 	Repos   []string
 	Servers []string
@@ -32,6 +34,12 @@ func (m *ObsidianMemory) Init(ctx context.Context, s InitSpec) error {
 		return fmt.Errorf("obsidian: Init needs a Project name")
 	}
 	base := s.base()
+
+	// Domain (optional, transverse): attach the project to a "domaines/<slug>" root.
+	var domainKey string
+	if s.Domain != "" {
+		domainKey = "domaines/" + s.Domain + "/index"
+	}
 
 	if s.Org != "" {
 		orgKey := s.Org + "/index"
@@ -57,9 +65,22 @@ func (m *ObsidianMemory) Init(ctx context.Context, s InitSpec) error {
 	for _, sv := range s.Servers {
 		projLinks = append(projLinks, contracts.Link{To: base + "/servers/" + sv, Rel: "contains"})
 	}
-	if err := m.ensure(ctx, contracts.Node{Key: projKey, Kind: contracts.KindProject,
-		Title: s.Project, Links: projLinks}); err != nil {
+	if domainKey != "" {
+		projLinks = append(projLinks, contracts.Link{To: domainKey, Rel: "in-domain"})
+	}
+	projNode := contracts.Node{Key: projKey, Kind: contracts.KindProject,
+		Title: s.Project, Links: projLinks}
+	if s.Domain != "" {
+		projNode.Meta = map[string]string{"domain": s.Domain}
+	}
+	if err := m.ensure(ctx, projNode); err != nil {
 		return err
+	}
+	if domainKey != "" {
+		if err := m.ensure(ctx, contracts.Node{Key: domainKey, Kind: contracts.KindDomain,
+			Title: s.Domain, Links: []contracts.Link{{To: projKey, Rel: "contains"}}}); err != nil {
+			return err
+		}
 	}
 	if err := m.ensure(ctx, contracts.Node{Key: base + "/architecture", Kind: contracts.KindArchitecture,
 		Title: s.Project + " — architecture", Links: []contracts.Link{{To: projKey, Rel: "belongs-to"}}}); err != nil {
