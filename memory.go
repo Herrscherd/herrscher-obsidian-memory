@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -31,6 +32,7 @@ type ObsidianMemory struct {
 	mu       sync.Mutex
 	root     *os.Root
 	lockFile *os.File
+	now      func() time.Time // injectable clock for capturedAt stamping (tests override)
 }
 
 // New opens (creating if absent) a vault directory and returns a Memory over it.
@@ -50,7 +52,7 @@ func New(root string) (*ObsidianMemory, error) {
 		r.Close()
 		return nil, fmt.Errorf("obsidian: open vault lock: %w", err)
 	}
-	return &ObsidianMemory{root: r, lockFile: lf}, nil
+	return &ObsidianMemory{root: r, lockFile: lf, now: time.Now}, nil
 }
 
 // flock takes the exclusive cross-process lock and returns its release func. The
@@ -91,6 +93,21 @@ func (m *ObsidianMemory) loadUnlocked(key string) (contracts.Node, error) {
 func (m *ObsidianMemory) recordUnlocked(n contracts.Node) error {
 	if err := validKey(n.Key); err != nil {
 		return err
+	}
+	// Stamp capturedAt (RFC3339 UTC) so recall can rank by recency. Only when
+	// absent: a caller-supplied value is kept, and on upsert an existing stored
+	// value is preserved so re-recording the same fact does not reset its age.
+	if n.Meta["capturedAt"] == "" {
+		at := m.now().UTC().Format(time.RFC3339)
+		if existing, err := m.loadUnlocked(n.Key); err == nil {
+			if prior := existing.Meta["capturedAt"]; prior != "" {
+				at = prior
+			}
+		}
+		if n.Meta == nil {
+			n.Meta = map[string]string{}
+		}
+		n.Meta["capturedAt"] = at
 	}
 	rel := keyToRel(n.Key)
 	if dir := filepath.Dir(rel); dir != "." {
@@ -236,6 +253,17 @@ func (m *ObsidianMemory) Search(ctx context.Context, q contracts.Query) ([]contr
 	})
 	if err != nil {
 		return nil, fmt.Errorf("obsidian: search: %w", err)
+	}
+	if q.Ranked {
+		// matchesQuery already gated membership, so every node here is a genuine
+		// match — ranking only orders them by relevance (highest first), then the
+		// Limit below takes the top-K. A stable sort keeps walk order among ties.
+		scores := make(map[string]float64, len(out))
+		for _, n := range out {
+			s, _ := contracts.Score(q.Text, m.now().UTC(), n)
+			scores[n.Key] = s
+		}
+		sort.SliceStable(out, func(i, j int) bool { return scores[out[i].Key] > scores[out[j].Key] })
 	}
 	if q.Limit > 0 && len(out) > q.Limit {
 		out = out[:q.Limit]
