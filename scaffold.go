@@ -44,7 +44,13 @@ func (m *ObsidianMemory) Init(ctx context.Context, s InitSpec) error {
 	if s.Org != "" {
 		orgKey := s.Org + "/index"
 		if err := m.ensure(ctx, contracts.Node{Key: orgKey, Kind: contracts.KindOrganization,
-			Title: s.Org, Links: []contracts.Link{{To: base + "/index", Rel: "contains"}}}); err != nil {
+			Title: s.Org}); err != nil {
+			return err
+		}
+		// Append via Links (idempotent) rather than the node literal so a second
+		// project under the same org is added instead of dropped (ensure skips an
+		// existing org node, so its literal links never grow).
+		if err := m.Links(ctx, orgKey, base+"/index", "contains"); err != nil {
 			return err
 		}
 	}
@@ -78,7 +84,12 @@ func (m *ObsidianMemory) Init(ctx context.Context, s InitSpec) error {
 	}
 	if domainKey != "" {
 		if err := m.ensure(ctx, contracts.Node{Key: domainKey, Kind: contracts.KindDomain,
-			Title: s.Domain, Links: []contracts.Link{{To: projKey, Rel: "contains"}}}); err != nil {
+			Title: s.Domain}); err != nil {
+			return err
+		}
+		// Same reason as the org contains-link above: append via Links so a domain
+		// accumulates every project attached to it, not just the first.
+		if err := m.Links(ctx, domainKey, projKey, "contains"); err != nil {
 			return err
 		}
 	}

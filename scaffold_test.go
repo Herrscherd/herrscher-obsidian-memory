@@ -163,3 +163,51 @@ func TestRecallDomainReachesProject(t *testing.T) {
 		t.Fatalf("Recall(domain) did not reach project: %v", reached)
 	}
 }
+
+func TestInitDomainAccumulatesMultipleProjects(t *testing.T) {
+	m := newTestMem(t)
+	ctx := context.Background()
+	if err := m.Init(ctx, InitSpec{Domain: "dev", Project: "a"}); err != nil {
+		t.Fatalf("Init a: %v", err)
+	}
+	if err := m.Init(ctx, InitSpec{Domain: "dev", Project: "b"}); err != nil {
+		t.Fatalf("Init b: %v", err)
+	}
+	sg, err := m.Recall(ctx, "domaines/dev/index", 1)
+	if err != nil {
+		t.Fatalf("Recall: %v", err)
+	}
+	reached := map[string]bool{}
+	for _, n := range sg.Nodes {
+		reached[n.Key] = true
+	}
+	for _, want := range []string{"projets/a/index", "projets/b/index"} {
+		if !reached[want] {
+			t.Fatalf("domain did not accumulate %q: %v", want, reached)
+		}
+	}
+}
+
+func TestInitOrgAccumulatesMultipleProjects(t *testing.T) {
+	m := newTestMem(t)
+	ctx := context.Background()
+	if err := m.Init(ctx, InitSpec{Org: "acme", Project: "a"}); err != nil {
+		t.Fatalf("Init a: %v", err)
+	}
+	if err := m.Init(ctx, InitSpec{Org: "acme", Project: "b"}); err != nil {
+		t.Fatalf("Init b: %v", err)
+	}
+	sg, err := m.Recall(ctx, "acme/index", 1)
+	if err != nil {
+		t.Fatalf("Recall: %v", err)
+	}
+	reached := map[string]bool{}
+	for _, n := range sg.Nodes {
+		reached[n.Key] = true
+	}
+	for _, want := range []string{"acme/a/index", "acme/b/index"} {
+		if !reached[want] {
+			t.Fatalf("org did not accumulate %q: %v", want, reached)
+		}
+	}
+}
