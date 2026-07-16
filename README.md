@@ -20,7 +20,7 @@ A blank import wires the plugin into a Herrscher host (xcaddy pattern):
 
     import _ "github.com/Herrscherd/herrscher-obsidian-memory"
 
-Config: `OBSIDIAN_VAULT` (required) — path to the vault directory.
+Config: `OBSIDIAN_VAULT` (optional) — path to the vault directory (default `~/.herrscher/memory`).
 
 ## Curation
 
