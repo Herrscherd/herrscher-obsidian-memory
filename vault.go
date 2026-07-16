@@ -12,6 +12,11 @@ var wikilinkRe = regexp.MustCompile(`\[\[([^\]|]+)(?:\|([^\]]+))?\]\]`)
 
 const liensHeader = "## Liens"
 
+// liensHeaderRe matches the "## Liens" trailing links section as a full line, so
+// the header is not suppressed by an incidental "## Liens" substring elsewhere in
+// the body (prose, a quote, a code block).
+var liensHeaderRe = regexp.MustCompile(`(?m)^## Liens[ \t]*$`)
+
 // frontValue keeps a frontmatter scalar on a single line so a value can never
 // inject extra keys or a closing "---" fence.
 func frontValue(s string) string {
@@ -34,7 +39,7 @@ func marshalNode(n contracts.Node) string {
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		b.WriteString(k + ": " + frontValue(n.Meta[k]) + "\n")
+		b.WriteString(frontValue(k) + ": " + frontValue(n.Meta[k]) + "\n")
 	}
 	b.WriteString("---\n")
 
@@ -43,7 +48,7 @@ func marshalNode(n contracts.Node) string {
 	for _, m := range wikilinkRe.FindAllStringSubmatch(body, -1) {
 		present[m[1]] = true
 	}
-	var missing []string
+	missing := make([]string, 0, len(n.Links))
 	for _, l := range n.Links {
 		if !present[l.To] {
 			tag := l.To
@@ -59,7 +64,7 @@ func marshalNode(n contracts.Node) string {
 		if !strings.HasSuffix(body, "\n") {
 			b.WriteString("\n")
 		}
-		if !strings.Contains(body, liensHeader) {
+		if !liensHeaderRe.MatchString(body) {
 			b.WriteString("\n" + liensHeader + "\n")
 		}
 		b.WriteString(strings.Join(missing, "\n") + "\n")
@@ -70,32 +75,61 @@ func marshalNode(n contracts.Node) string {
 func unmarshalNode(key string, data []byte) contracts.Node {
 	n := contracts.Node{Key: key, Meta: map[string]string{}}
 	s := string(data)
-	body := s
 
-	if strings.HasPrefix(s, "---\n") {
-		if end := strings.Index(s[4:], "\n---"); end >= 0 {
-			front := s[4 : 4+end]
-			body = strings.TrimPrefix(s[4+end+4:], "\n")
-			for _, line := range strings.Split(front, "\n") {
-				k, v, ok := strings.Cut(line, ":")
-				if !ok {
-					continue
-				}
-				k, v = strings.TrimSpace(k), strings.TrimSpace(v)
-				switch k {
-				case "type":
-					n.Kind = contracts.NodeKind(v)
-				case "title":
-					n.Title = v
-				default:
-					n.Meta[k] = v
-				}
+	front, body, ok := splitFrontmatter(s)
+	if ok {
+		for _, line := range strings.Split(front, "\n") {
+			k, v, ok := strings.Cut(line, ":")
+			if !ok {
+				continue
+			}
+			k, v = strings.TrimSpace(k), strings.TrimSpace(v)
+			switch k {
+			case "type":
+				n.Kind = contracts.NodeKind(v)
+			case "title":
+				n.Title = v
+			default:
+				n.Meta[k] = v
 			}
 		}
 	}
 	n.Body = body
-	for _, m := range wikilinkRe.FindAllStringSubmatch(body, -1) {
+	matches := wikilinkRe.FindAllStringSubmatch(body, -1)
+	n.Links = make([]contracts.Link, 0, len(matches))
+	for _, m := range matches {
 		n.Links = append(n.Links, contracts.Link{To: m[1], Rel: m[2]})
 	}
 	return n
+}
+
+// splitFrontmatter separates a leading YAML frontmatter block from the body. The
+// opening and closing fences must each be a standalone "---" line: a file that
+// merely begins with a markdown thematic break, or whose only "---" sits mid-line,
+// is treated as pure body so hand-authored notes are never mis-parsed. When no
+// closing fence is found ok is false and the whole input is returned as body.
+func splitFrontmatter(s string) (front, body string, ok bool) {
+	if !strings.HasPrefix(s, "---\n") {
+		return "", s, false
+	}
+	rest := s[4:]
+	for off := 0; off <= len(rest); {
+		line := rest[off:]
+		nl := strings.IndexByte(line, '\n')
+		cur := line
+		if nl >= 0 {
+			cur = line[:nl]
+		}
+		if cur == "---" {
+			if nl < 0 {
+				return rest[:off], "", true
+			}
+			return rest[:off], rest[off+nl+1:], true
+		}
+		if nl < 0 {
+			break
+		}
+		off += nl + 1
+	}
+	return "", s, false
 }

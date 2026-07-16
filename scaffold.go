@@ -56,7 +56,7 @@ func (m *ObsidianMemory) Init(ctx context.Context, s InitSpec) error {
 	}
 
 	projKey := base + "/index"
-	var projLinks []contracts.Link
+	projLinks := make([]contracts.Link, 0, 4+len(s.Repos)+len(s.Servers))
 	if s.Org != "" {
 		projLinks = append(projLinks, contracts.Link{To: s.Org + "/index", Rel: "belongs-to"})
 	}
@@ -129,5 +129,5 @@ func (m *ObsidianMemory) ensure(ctx context.Context, n contracts.Node) error {
 	if _, err := m.root.Stat(keyToRel(n.Key)); err == nil {
 		return nil // exists — never overwrite
 	}
-	return m.recordUnlocked(n)
+	return m.recordUnlockedNoReload(n)
 }

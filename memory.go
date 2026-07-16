@@ -22,6 +22,10 @@ import (
 // a hidden non-markdown file, so Obsidian, git, and Search all ignore it.
 const lockName = ".herrscher.lock"
 
+// lockPollInterval is how often flock retries the non-blocking cross-process lock
+// while a peer holds it, until ctx expires.
+const lockPollInterval = 10 * time.Millisecond
+
 // ObsidianMemory implements contracts.Memory over a markdown vault. All file I/O
 // goes through an *os.Root so a malicious key or an in-vault symlink can never
 // escape the root. The mutex serializes writes within this process; lockFile
@@ -33,6 +37,19 @@ type ObsidianMemory struct {
 	root     *os.Root
 	lockFile *os.File
 	now      func() time.Time // injectable clock for capturedAt stamping (tests override)
+
+	// parseCache memoizes the parsed Node of each .md file so a Search walk only
+	// re-reads and re-parses files whose size or mtime changed since last seen,
+	// turning the repeated whole-vault read+parse+regex into a stat per file for
+	// the unchanged majority. Guarded by mu (Search holds it); every write bumps
+	// the file's mtime via the atomic rename, so stale entries self-invalidate.
+	parseCache map[string]cachedNode
+}
+
+type cachedNode struct {
+	mod  time.Time
+	size int64
+	node contracts.Node
 }
 
 // New opens (creating if absent) a vault directory and returns a Memory over it.
@@ -52,7 +69,7 @@ func New(root string) (*ObsidianMemory, error) {
 		r.Close()
 		return nil, fmt.Errorf("obsidian: open vault lock: %w", err)
 	}
-	return &ObsidianMemory{root: r, lockFile: lf, now: time.Now}, nil
+	return &ObsidianMemory{root: r, lockFile: lf, now: time.Now, parseCache: map[string]cachedNode{}}, nil
 }
 
 // flock takes the exclusive cross-process lock and returns its release func. The
@@ -73,8 +90,9 @@ func (m *ObsidianMemory) flock(ctx context.Context) func() {
 		}
 		select {
 		case <-ctx.Done():
+			fmt.Fprintf(os.Stderr, "obsidian: vault lock: proceeding without cross-process lock: %v\n", ctx.Err())
 			return func() {}
-		case <-time.After(10 * time.Millisecond):
+		case <-time.After(lockPollInterval):
 		}
 	}
 }
@@ -90,7 +108,22 @@ func (m *ObsidianMemory) loadUnlocked(key string) (contracts.Node, error) {
 	return unmarshalNode(key, data), nil
 }
 
+// recordUnlocked upserts a node, reading the existing file (if any) to preserve a
+// prior capturedAt stamp. Callers that already know no prior file exists, or that
+// carry the loaded node, use recordUnlockedNoReload to skip that read.
 func (m *ObsidianMemory) recordUnlocked(n contracts.Node) error {
+	return m.writeNode(n, true)
+}
+
+// recordUnlockedNoReload writes without reading the existing file for a prior
+// capturedAt: for ensure the file is known-absent, and for Links the caller passes
+// the already-loaded node (which carries any prior stamp), so the extra read would
+// be pure overhead.
+func (m *ObsidianMemory) recordUnlockedNoReload(n contracts.Node) error {
+	return m.writeNode(n, false)
+}
+
+func (m *ObsidianMemory) writeNode(n contracts.Node, reloadPrior bool) error {
 	if err := validKey(n.Key); err != nil {
 		return err
 	}
@@ -99,9 +132,11 @@ func (m *ObsidianMemory) recordUnlocked(n contracts.Node) error {
 	// value is preserved so re-recording the same fact does not reset its age.
 	if n.Meta["capturedAt"] == "" {
 		at := m.now().UTC().Format(time.RFC3339)
-		if existing, err := m.loadUnlocked(n.Key); err == nil {
-			if prior := existing.Meta["capturedAt"]; prior != "" {
-				at = prior
+		if reloadPrior {
+			if existing, err := m.loadUnlocked(n.Key); err == nil {
+				if prior := existing.Meta["capturedAt"]; prior != "" {
+					at = prior
+				}
 			}
 		}
 		if n.Meta == nil {
@@ -211,7 +246,7 @@ func (m *ObsidianMemory) Links(ctx context.Context, from, to, rel string) error 
 		}
 	}
 	n.Links = append(n.Links, contracts.Link{To: to, Rel: rel})
-	return m.recordUnlocked(n)
+	return m.recordUnlockedNoReload(n)
 }
 
 // Close releases the vault lock and root handle.
@@ -241,11 +276,22 @@ func (m *ObsidianMemory) Search(ctx context.Context, q contracts.Query) ([]contr
 		if !d.Type().IsRegular() || !strings.HasSuffix(path, ".md") {
 			return nil // skip dirs, symlinks, and non-markdown
 		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if c, ok := m.parseCache[path]; ok && c.size == info.Size() && c.mod.Equal(info.ModTime()) {
+			if matchesQuery(c.node, q) {
+				out = append(out, c.node)
+			}
+			return nil
+		}
 		data, err := fs.ReadFile(fsys, path)
 		if err != nil {
 			return err
 		}
 		n := unmarshalNode(strings.TrimSuffix(path, ".md"), data)
+		m.parseCache[path] = cachedNode{mod: info.ModTime(), size: info.Size(), node: n}
 		if matchesQuery(n, q) {
 			out = append(out, n)
 		}
@@ -291,15 +337,21 @@ func matchesQuery(n contracts.Node, q contracts.Query) bool {
 		}
 	}
 	if len(q.Tags) > 0 {
-		tags := map[string]bool{}
-		for _, t := range strings.Split(n.Meta["tags"], ",") {
-			tags[strings.TrimSpace(strings.ToLower(t))] = true
-		}
-		if d := strings.TrimSpace(strings.ToLower(n.Meta["domain"])); d != "" {
-			tags[d] = true
-		}
+		rawTags := strings.ToLower(n.Meta["tags"])
+		domain := strings.TrimSpace(strings.ToLower(n.Meta["domain"]))
 		for _, want := range q.Tags {
-			if !tags[strings.ToLower(want)] {
+			w := strings.ToLower(want)
+			if domain != "" && w == domain {
+				continue
+			}
+			found := false
+			for _, t := range strings.Split(rawTags, ",") {
+				if strings.TrimSpace(t) == w {
+					found = true
+					break
+				}
+			}
+			if !found {
 				return false
 			}
 		}
