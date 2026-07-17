@@ -15,6 +15,9 @@ var _ contracts.Deleter = (*ObsidianMemory)(nil)
 // même verrouillage in-process + cross-process que les écritures et invalide le
 // parseCache pour le fichier retiré.
 func (m *ObsidianMemory) Delete(ctx context.Context, key string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := validKey(key); err != nil {
 		return err
 	}

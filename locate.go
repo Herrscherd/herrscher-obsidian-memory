@@ -14,10 +14,16 @@ var _ contracts.Locator = (*ObsidianMemory)(nil)
 // Locate renvoie les URIs ouvrables de la note du Key. La mémoire résout
 // elle-même son chemin (aucun caller ne devine le stockage). Erreur si le Key
 // est invalide ou si la note n'existe pas.
-func (m *ObsidianMemory) Locate(_ context.Context, key string) (contracts.Location, error) {
+func (m *ObsidianMemory) Locate(ctx context.Context, key string) (contracts.Location, error) {
+	if err := ctx.Err(); err != nil {
+		return contracts.Location{}, err
+	}
 	if err := validKey(key); err != nil {
 		return contracts.Location{}, err
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	defer m.flock(ctx)()
 	rel := keyToRel(key)
 	// Existence via l'*os.Root (jamais d'évasion hors du vault).
 	f, err := m.root.Open(rel)
