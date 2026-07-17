@@ -45,3 +45,25 @@ func TestLocateUnsafeKey(t *testing.T) {
 		t.Fatal("expected error for unsafe key")
 	}
 }
+
+func TestLocateEncodesSpacesInPath(t *testing.T) {
+	dir := t.TempDir() + "/My Vault"
+	m, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	if err := m.Record(context.Background(), contracts.Node{Key: "a/b", Kind: contracts.KindDecision}); err != nil {
+		t.Fatal(err)
+	}
+	loc, err := m.Locate(context.Background(), "a/b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(loc.File, " ") {
+		t.Fatalf("file URI must be encoded, got %q", loc.File)
+	}
+	if !strings.HasPrefix(loc.File, "file://") || !strings.HasSuffix(loc.File, "/a/b.md") {
+		t.Fatalf("file URI = %q", loc.File)
+	}
+}

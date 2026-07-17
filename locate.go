@@ -31,6 +31,6 @@ func (m *ObsidianMemory) Locate(_ context.Context, key string) (contracts.Locati
 		url.QueryEscape(vault), url.QueryEscape(key))
 	return contracts.Location{
 		Obsidian: obs,
-		File:     "file://" + abs,
+		File:     (&url.URL{Scheme: "file", Path: abs}).String(),
 	}, nil
 }
