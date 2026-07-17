@@ -24,6 +24,8 @@ Config: `OBSIDIAN_VAULT` (optional) — path to the vault directory (default `~/
 
 ## Curation
 
-This plugin exposes only the passive verbs (Recall/Record/Search/Links). The
-proactive "nudge" loop is the `contracts.CurationHook` seam, owned by the
+This plugin exposes the passive verbs (Recall/Record/Search/Links), plus the
+optional `Locator` (URI lookup: `obsidian://` + `file://`) and `Deleter`
+(idempotent node removal) capability interfaces from contracts. The proactive
+"nudge" loop is the `contracts.CurationHook` seam, owned by the
 [orchestrator](https://github.com/Herrscherd/herrscher-orchestrator) — not here.
