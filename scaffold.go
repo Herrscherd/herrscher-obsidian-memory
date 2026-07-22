@@ -3,9 +3,19 @@ package obsidian
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/Herrscherd/herrscher-contracts"
 )
+
+// slug canonicalizes a caller-supplied name into a vault key path segment. Names
+// enter the keyspace verbatim, so "Neublox" and "neublox" would otherwise scaffold
+// two separate scopes; folding case (and trimming surrounding space) collapses them
+// onto one canonical path. The raw name is kept for node Titles, so the human UI
+// still shows the original casing.
+func slug(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
+}
 
 // InitSpec describes a project to scaffold. Org is optional; when empty the
 // project lives flat under "projets/<Project>". Domain is optional; when set it
@@ -22,9 +32,9 @@ type InitSpec struct {
 // "projets/<project>").
 func (s InitSpec) base() string {
 	if s.Org != "" {
-		return s.Org + "/" + s.Project
+		return slug(s.Org) + "/" + slug(s.Project)
 	}
-	return "projets/" + s.Project
+	return "projets/" + slug(s.Project)
 }
 
 // Init scaffolds the canonical layout. It only writes nodes that do not yet exist
@@ -38,11 +48,11 @@ func (m *ObsidianMemory) Init(ctx context.Context, s InitSpec) error {
 	// Domain (optional, transverse): attach the project to a "domaines/<slug>" root.
 	var domainKey string
 	if s.Domain != "" {
-		domainKey = "domaines/" + s.Domain + "/index"
+		domainKey = "domaines/" + slug(s.Domain) + "/index"
 	}
 
 	if s.Org != "" {
-		orgKey := s.Org + "/index"
+		orgKey := slug(s.Org) + "/index"
 		if err := m.ensure(ctx, contracts.Node{Key: orgKey, Kind: contracts.KindOrganization,
 			Title: s.Org}); err != nil {
 			return err
@@ -58,7 +68,7 @@ func (m *ObsidianMemory) Init(ctx context.Context, s InitSpec) error {
 	projKey := base + "/index"
 	projLinks := make([]contracts.Link, 0, 4+len(s.Repos)+len(s.Servers))
 	if s.Org != "" {
-		projLinks = append(projLinks, contracts.Link{To: s.Org + "/index", Rel: "belongs-to"})
+		projLinks = append(projLinks, contracts.Link{To: slug(s.Org) + "/index", Rel: "belongs-to"})
 	}
 	// The project node links down to every child so Recall(project) surfaces the
 	// whole spine; children also link back up (belongs-to) below.
@@ -66,10 +76,10 @@ func (m *ObsidianMemory) Init(ctx context.Context, s InitSpec) error {
 		contracts.Link{To: base + "/architecture", Rel: "contains"},
 		contracts.Link{To: base + "/production", Rel: "contains"})
 	for _, r := range s.Repos {
-		projLinks = append(projLinks, contracts.Link{To: base + "/repos/" + r, Rel: "contains"})
+		projLinks = append(projLinks, contracts.Link{To: base + "/repos/" + slug(r), Rel: "contains"})
 	}
 	for _, sv := range s.Servers {
-		projLinks = append(projLinks, contracts.Link{To: base + "/servers/" + sv, Rel: "contains"})
+		projLinks = append(projLinks, contracts.Link{To: base + "/servers/" + slug(sv), Rel: "contains"})
 	}
 	if domainKey != "" {
 		projLinks = append(projLinks, contracts.Link{To: domainKey, Rel: "in-domain"})
@@ -103,13 +113,13 @@ func (m *ObsidianMemory) Init(ctx context.Context, s InitSpec) error {
 	}
 
 	for _, r := range s.Repos {
-		if err := m.ensure(ctx, contracts.Node{Key: base + "/repos/" + r, Kind: contracts.KindRepo,
+		if err := m.ensure(ctx, contracts.Node{Key: base + "/repos/" + slug(r), Kind: contracts.KindRepo,
 			Title: r, Links: []contracts.Link{{To: projKey, Rel: "belongs-to"}}}); err != nil {
 			return err
 		}
 	}
 	for _, sv := range s.Servers {
-		if err := m.ensure(ctx, contracts.Node{Key: base + "/servers/" + sv, Kind: contracts.KindServer,
+		if err := m.ensure(ctx, contracts.Node{Key: base + "/servers/" + slug(sv), Kind: contracts.KindServer,
 			Title: sv, Links: []contracts.Link{{To: projKey, Rel: "belongs-to"}}}); err != nil {
 			return err
 		}

@@ -8,6 +8,40 @@ import (
 	"github.com/Herrscherd/herrscher-contracts"
 )
 
+func TestInitCanonicalizesProjectCaseToOneScope(t *testing.T) {
+	m := newTestMem(t)
+	ctx := context.Background()
+	if err := m.Init(ctx, InitSpec{Project: "Neublox"}); err != nil {
+		t.Fatalf("first Init: %v", err)
+	}
+	if err := m.Init(ctx, InitSpec{Project: "neublox"}); err != nil {
+		t.Fatalf("second Init: %v", err)
+	}
+	proj, err := m.load("projets/neublox/index")
+	if err != nil {
+		t.Fatalf("canonical project node missing: %v", err)
+	}
+	if proj.Title != "Neublox" {
+		t.Fatalf("project Title = %q, want raw first-seen casing Neublox", proj.Title)
+	}
+	if _, err := m.load("projets/Neublox/index"); err == nil {
+		t.Fatalf("mixed-case duplicate scope projets/Neublox/index was created")
+	}
+}
+
+func TestInitCanonicalizesOrgAndDomainCase(t *testing.T) {
+	m := newTestMem(t)
+	ctx := context.Background()
+	if err := m.Init(ctx, InitSpec{Org: "Acme", Domain: "Dev", Project: "Proj"}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	for _, key := range []string{"acme/index", "acme/proj/index", "domaines/dev/index"} {
+		if _, err := m.load(key); err != nil {
+			t.Fatalf("expected canonical key %q: %v", key, err)
+		}
+	}
+}
+
 func TestInitScaffoldsHierarchy(t *testing.T) {
 	m := newTestMem(t)
 	ctx := context.Background()
