@@ -14,6 +14,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Herrscherd/herrscher-contracts"
 )
@@ -44,6 +45,10 @@ type ObsidianMemory struct {
 	// the unchanged majority. Guarded by mu (Search holds it); every write bumps
 	// the file's mtime via the atomic rename, so stale entries self-invalidate.
 	parseCache map[string]cachedNode
+
+	// budget is the per-node Body rune budget enforced by Record; 0 disables it.
+	// Guarded by mu (SetNodeBudget writes it, recordUnlocked reads it under mu).
+	budget int
 }
 
 type cachedNode struct {
@@ -97,6 +102,15 @@ func (m *ObsidianMemory) flock(ctx context.Context) func() {
 	}
 }
 
+// SetNodeBudget sets the per-node Body budget in runes; 0 (the default) disables
+// enforcement. When positive, Record returns *contracts.BudgetError for any node
+// whose Body exceeds it — the caller must consolidate/replace to fit (G1).
+func (m *ObsidianMemory) SetNodeBudget(runes int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.budget = runes
+}
+
 func (m *ObsidianMemory) loadUnlocked(key string) (contracts.Node, error) {
 	if err := validKey(key); err != nil {
 		return contracts.Node{}, err
@@ -112,6 +126,11 @@ func (m *ObsidianMemory) loadUnlocked(key string) (contracts.Node, error) {
 // prior capturedAt stamp. Callers that already know no prior file exists, or that
 // carry the loaded node, use recordUnlockedNoReload to skip that read.
 func (m *ObsidianMemory) recordUnlocked(n contracts.Node) error {
+	if m.budget > 0 {
+		if r := utf8.RuneCountInString(n.Body); r > m.budget {
+			return &contracts.BudgetError{Key: n.Key, Runes: r, Limit: m.budget}
+		}
+	}
 	return m.writeNode(n, true)
 }
 

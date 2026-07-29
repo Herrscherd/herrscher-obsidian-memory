@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/Herrscherd/herrscher-contracts"
 )
@@ -16,6 +17,7 @@ func init() {
 			Category: contracts.CategoryMemory,
 			Config: []contracts.Setting{
 				{Key: "vault", Env: "OBSIDIAN_VAULT", Help: "path to the memory vault directory (default ~/.herrscher/memory)", Required: false},
+				{Key: "node-budget", Env: "OBSIDIAN_NODE_BUDGET", Help: "per-node Body budget in runes; 0 disables (default 2000)", Required: false},
 			},
 		},
 		Memory: func(ctx context.Context, cfg contracts.PluginConfig) (contracts.Memory, error) {
@@ -32,7 +34,20 @@ func init() {
 			}
 			// EnsureVault (not New): provision a missing directory + .obsidian config
 			// so the vault opens as an Obsidian vault with no manual setup.
-			return EnsureVault(root)
+			mem, err := EnsureVault(root)
+			if err != nil {
+				return nil, err
+			}
+			budget := 2000
+			if v := cfg.Get("node-budget"); v != "" {
+				n, err := strconv.Atoi(v)
+				if err != nil {
+					return nil, fmt.Errorf("obsidian: node-budget: %w", err)
+				}
+				budget = n
+			}
+			mem.SetNodeBudget(budget)
+			return mem, nil
 		},
 	})
 }
