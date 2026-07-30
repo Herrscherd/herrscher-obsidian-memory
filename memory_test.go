@@ -106,6 +106,51 @@ func TestSearchByKindTagText(t *testing.T) {
 	}
 }
 
+func TestSearchHidesTranscriptUnlessIncludeRaw(t *testing.T) {
+	m := newTestMem(t)
+	ctx := context.Background()
+	if err := m.Record(ctx, contracts.Node{Key: "projects/p/fact", Kind: contracts.KindProject, Title: "widget throughput", Body: "the widget runs at 5rps"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Record(ctx, contracts.Node{Key: "raw/s/1", Kind: contracts.KindTranscript, Title: "turn 1", Body: "user: how fast is the widget → assistant: 5rps"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Default query: raw chunk hidden.
+	got, err := m.Search(ctx, contracts.Query{Text: "widget"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range got {
+		if n.Kind == contracts.KindTranscript {
+			t.Fatalf("default Search returned a raw transcript node %q; must be hidden", n.Key)
+		}
+	}
+
+	// Sweep-shaped query (IncludeArchived true, IncludeRaw unset): still hidden.
+	got, _ = m.Search(ctx, contracts.Query{Text: "widget", IncludeArchived: true})
+	for _, n := range got {
+		if n.Kind == contracts.KindTranscript {
+			t.Fatalf("IncludeArchived Search leaked a raw node %q; sweep/merge/promote must not see raw", n.Key)
+		}
+	}
+
+	// Opt-in: raw chunk visible.
+	got, err = m.Search(ctx, contracts.Query{Text: "widget", IncludeRaw: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawRaw bool
+	for _, n := range got {
+		if n.Key == "raw/s/1" {
+			sawRaw = true
+		}
+	}
+	if !sawRaw {
+		t.Fatal("IncludeRaw Search did not return the raw transcript node")
+	}
+}
+
 func TestLinksCreatesEdgeVisibleToRecall(t *testing.T) {
 	m := newTestMem(t)
 	ctx := context.Background()

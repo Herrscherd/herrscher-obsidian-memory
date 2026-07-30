@@ -353,6 +353,9 @@ func matchesQuery(n contracts.Node, q contracts.Query) bool {
 	if n.Meta[contracts.MetaState] == contracts.StateArchived && !q.IncludeArchived {
 		return false
 	}
+	if n.Kind == contracts.KindTranscript && !q.IncludeRaw {
+		return false // G7 raw archival tier: hidden unless the caller opts in
+	}
 	if len(q.Kinds) > 0 {
 		ok := false
 		for _, k := range q.Kinds {
