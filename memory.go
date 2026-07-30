@@ -163,6 +163,16 @@ func (m *ObsidianMemory) writeNode(n contracts.Node, reloadPrior bool) error {
 		}
 		n.Meta["capturedAt"] = at
 	}
+	// Stamp lastSeen (RFC3339 UTC) — the staleness machine's age basis. Unlike
+	// capturedAt, it is NOT preserved on upsert: an ordinary re-record bumps it
+	// to now (reactivation), while the curator sweep re-supplies the existing
+	// value so a state-only write leaves the node's age untouched.
+	if n.Meta[contracts.MetaLastSeen] == "" {
+		if n.Meta == nil {
+			n.Meta = map[string]string{}
+		}
+		n.Meta[contracts.MetaLastSeen] = m.now().UTC().Format(time.RFC3339)
+	}
 	rel := keyToRel(n.Key)
 	if dir := filepath.Dir(rel); dir != "." {
 		if err := m.root.MkdirAll(dir, 0o755); err != nil {

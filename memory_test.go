@@ -373,3 +373,58 @@ func TestSearch_UnrankedReturnsAllMatches(t *testing.T) {
 		t.Fatalf("unranked should return all matches, got %d", len(got))
 	}
 }
+
+func TestWriteNodeStampsAndBumpsLastSeen(t *testing.T) {
+	m, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	m.now = func() time.Time { return t0 }
+
+	ctx := context.Background()
+	if err := m.Record(ctx, contracts.Node{Key: "n1", Body: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := m.Recall(ctx, "n1", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Root.Meta[contracts.MetaLastSeen] != t0.Format(time.RFC3339) {
+		t.Fatalf("lastSeen = %q, want %q", got.Root.Meta[contracts.MetaLastSeen], t0.Format(time.RFC3339))
+	}
+	capturedAt := got.Root.Meta["capturedAt"]
+
+	// Re-record at a later clock with no lastSeen supplied: lastSeen bumps,
+	// capturedAt is preserved.
+	t1 := t0.Add(48 * time.Hour)
+	m.now = func() time.Time { return t1 }
+	if err := m.Record(ctx, contracts.Node{Key: "n1", Body: "hello again"}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = m.Recall(ctx, "n1", 0)
+	if got.Root.Meta[contracts.MetaLastSeen] != t1.Format(time.RFC3339) {
+		t.Fatalf("lastSeen not bumped: %q", got.Root.Meta[contracts.MetaLastSeen])
+	}
+	if got.Root.Meta["capturedAt"] != capturedAt {
+		t.Fatalf("capturedAt changed: %q want %q", got.Root.Meta["capturedAt"], capturedAt)
+	}
+}
+
+func TestWriteNodeHonorsSuppliedLastSeen(t *testing.T) {
+	m, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.now = func() time.Time { return time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC) }
+	supplied := "2020-01-02T03:04:05Z"
+	if err := m.Record(context.Background(), contracts.Node{
+		Key: "n2", Body: "x", Meta: map[string]string{contracts.MetaLastSeen: supplied},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := m.Recall(context.Background(), "n2", 0)
+	if got.Root.Meta[contracts.MetaLastSeen] != supplied {
+		t.Fatalf("supplied lastSeen not honored: %q", got.Root.Meta[contracts.MetaLastSeen])
+	}
+}
