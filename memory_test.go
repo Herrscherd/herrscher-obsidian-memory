@@ -428,3 +428,62 @@ func TestWriteNodeHonorsSuppliedLastSeen(t *testing.T) {
 		t.Fatalf("supplied lastSeen not honored: %q", got.Root.Meta[contracts.MetaLastSeen])
 	}
 }
+
+func TestArchivedExclusion(t *testing.T) {
+	m, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	archived := map[string]string{contracts.MetaState: contracts.StateArchived}
+
+	if err := m.Record(ctx, contracts.Node{Key: "root", Body: "keyword root",
+		Links: []contracts.Link{{To: "old", Rel: "rel"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Record(ctx, contracts.Node{Key: "old", Body: "keyword old", Meta: archived}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Search hides archived by default...
+	hits, err := m.Search(ctx, contracts.Query{Text: "keyword"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range hits {
+		if n.Key == "old" {
+			t.Fatalf("archived node returned by default Search")
+		}
+	}
+	// ...but IncludeArchived reaches it.
+	hits, _ = m.Search(ctx, contracts.Query{Text: "keyword", IncludeArchived: true})
+	found := false
+	for _, n := range hits {
+		if n.Key == "old" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("archived node missing with IncludeArchived=true")
+	}
+
+	// Recall from active root: archived neighbor is hidden.
+	sg, err := m.Recall(ctx, "root", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range sg.Nodes {
+		if n.Key == "old" {
+			t.Fatalf("archived neighbor leaked into Recall")
+		}
+	}
+
+	// Recall of an archived key directly: root still returned.
+	sg, err = m.Recall(ctx, "old", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sg.Root.Key != "old" {
+		t.Fatalf("archived root not returned by direct Recall: %q", sg.Root.Key)
+	}
+}

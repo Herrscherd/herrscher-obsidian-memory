@@ -245,6 +245,9 @@ func (m *ObsidianMemory) Recall(ctx context.Context, key string, depth int) (con
 				if err != nil {
 					continue // dangling link: skip, do not fail the whole recall
 				}
+				if child.Meta[contracts.MetaState] == contracts.StateArchived {
+					continue // archived neighbor: hide from graph expansion (root is always returned)
+				}
 				sg.Nodes = append(sg.Nodes, child)
 				next = append(next, child)
 			}
@@ -347,6 +350,9 @@ func (m *ObsidianMemory) Search(ctx context.Context, q contracts.Query) ([]contr
 }
 
 func matchesQuery(n contracts.Node, q contracts.Query) bool {
+	if n.Meta[contracts.MetaState] == contracts.StateArchived && !q.IncludeArchived {
+		return false
+	}
 	if len(q.Kinds) > 0 {
 		ok := false
 		for _, k := range q.Kinds {
