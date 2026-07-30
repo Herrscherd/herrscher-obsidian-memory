@@ -126,7 +126,10 @@ func (m *ObsidianMemory) loadUnlocked(key string) (contracts.Node, error) {
 // prior capturedAt stamp. Callers that already know no prior file exists, or that
 // carry the loaded node, use recordUnlockedNoReload to skip that read.
 func (m *ObsidianMemory) recordUnlocked(n contracts.Node) error {
-	if m.budget > 0 {
+	// KindTranscript is the append-only raw archival tier (G7): it must be stored
+	// verbatim, so the per-node Body budget never applies to it. Every distilled
+	// kind is still subject to the budget.
+	if m.budget > 0 && n.Kind != contracts.KindTranscript {
 		if r := utf8.RuneCountInString(n.Body); r > m.budget {
 			return &contracts.BudgetError{Key: n.Key, Runes: r, Limit: m.budget}
 		}
