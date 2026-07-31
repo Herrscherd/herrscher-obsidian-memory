@@ -22,6 +22,50 @@ func newTestMem(t *testing.T) *ObsidianMemory {
 	return m
 }
 
+func TestUnlinkRemovesEdgeAndPreservesProse(t *testing.T) {
+	ctx := context.Background()
+	m := newTestMem(t)
+
+	// A node whose body mixes a human inline wikilink, surrounding prose, and a
+	// managed bullet edge — Unlink must remove only the edges to "proj/b".
+	body := "See [[proj/b|decided-in]] for context and keep [[proj/c|see-also]] too.\n\n## Liens\n- [[proj/b|merged-into]]\n"
+	if err := m.Record(ctx, contracts.Node{Key: "proj/a", Kind: contracts.KindProject, Title: "A", Body: body}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := m.Unlink(ctx, "proj/a", "proj/b"); err != nil {
+		t.Fatal(err)
+	}
+
+	sg, err := m.Recall(ctx, "proj/a", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundC := false
+	for _, l := range sg.Root.Links {
+		if l.To == "proj/b" {
+			t.Fatalf("edge to proj/b still present after Unlink: %+v", sg.Root.Links)
+		}
+		if l.To == "proj/c" {
+			foundC = true
+		}
+	}
+	if !foundC {
+		t.Fatalf("Unlink dropped the unrelated edge to proj/c: %+v", sg.Root.Links)
+	}
+	if !strings.Contains(sg.Root.Body, "for context and keep") {
+		t.Fatalf("Unlink mangled surrounding prose: %q", sg.Root.Body)
+	}
+	if strings.Contains(sg.Root.Body, "[[proj/b") {
+		t.Fatalf("Unlink left a [[proj/b...]] token in the body: %q", sg.Root.Body)
+	}
+
+	// Idempotent: unlinking an absent edge is a no-op, not an error.
+	if err := m.Unlink(ctx, "proj/a", "proj/b"); err != nil {
+		t.Fatalf("second Unlink should be a no-op, got %v", err)
+	}
+}
+
 func TestRecordThenRecall(t *testing.T) {
 	m := newTestMem(t)
 	ctx := context.Background()

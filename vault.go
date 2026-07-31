@@ -72,6 +72,37 @@ func marshalNode(n contracts.Node) string {
 	return b.String()
 }
 
+// exciseWikilinks removes every wikilink whose target key is `to` from body:
+// a managed bullet line ("- [[to|rel]]" optionally with trailing spaces) is
+// dropped whole; an inline "[[to|rel]]" / "[[to]]" token is removed in place,
+// then a double space or space-before-punctuation left behind is collapsed.
+// Only edges to `to` are touched — other wikilinks and prose are preserved.
+func exciseWikilinks(body, to string) string {
+	lines := strings.Split(body, "\n")
+	kept := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "- ") {
+			rest := strings.TrimSpace(trimmed[2:])
+			if m := wikilinkRe.FindStringSubmatch(rest); m != nil && m[1] == to && wikilinkRe.ReplaceAllString(rest, "") == "" {
+				continue // pure "- [[to|rel]]" bullet — remove the whole line
+			}
+		}
+		line = wikilinkRe.ReplaceAllStringFunc(line, func(tok string) string {
+			if m := wikilinkRe.FindStringSubmatch(tok); m != nil && m[1] == to {
+				return ""
+			}
+			return tok
+		})
+		kept = append(kept, line)
+	}
+	out := strings.Join(kept, "\n")
+	out = strings.ReplaceAll(out, "  ", " ")
+	out = strings.ReplaceAll(out, " ,", ",")
+	out = strings.ReplaceAll(out, " .", ".")
+	return out
+}
+
 func unmarshalNode(key string, data []byte) contracts.Node {
 	n := contracts.Node{Key: key, Meta: map[string]string{}}
 	s := string(data)

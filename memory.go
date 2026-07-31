@@ -287,6 +287,40 @@ func (m *ObsidianMemory) Links(ctx context.Context, from, to, rel string) error 
 	return m.recordUnlockedNoReload(n)
 }
 
+// Unlink removes the edge from→to (the inverse of Links): it drops every
+// contracts.Link with To == to from the source node AND excises the matching
+// [[to|rel]] wikilink text from its body, since the obsidian body is the source
+// of truth for edges (marshalNode only appends, never removes, so dropping the
+// Link alone would round-trip straight back). Idempotent: an absent edge is a
+// no-op. Under the same lock as Links; a human co-owns the note.
+func (m *ObsidianMemory) Unlink(ctx context.Context, from, to string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	defer m.flock(ctx)()
+	n, err := m.loadUnlocked(from)
+	if err != nil {
+		return err
+	}
+	kept := n.Links[:0:0]
+	found := false
+	for _, l := range n.Links {
+		if l.To == to {
+			found = true
+			continue
+		}
+		kept = append(kept, l)
+	}
+	if !found {
+		return nil // no edge to `to` — no-op, no needless mtime bump
+	}
+	n.Links = kept
+	n.Body = exciseWikilinks(n.Body, to)
+	return m.recordUnlockedNoReload(n)
+}
+
 // Close releases the vault lock and root handle.
 func (m *ObsidianMemory) Close() error {
 	if m.lockFile != nil {
