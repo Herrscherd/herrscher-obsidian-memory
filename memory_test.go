@@ -26,9 +26,15 @@ func TestUnlinkRemovesEdgeAndPreservesProse(t *testing.T) {
 	ctx := context.Background()
 	m := newTestMem(t)
 
-	// A node whose body mixes a human inline wikilink, surrounding prose, and a
-	// managed bullet edge — Unlink must remove only the edges to "proj/b".
-	body := "See [[proj/b|decided-in]] for context and keep [[proj/c|see-also]] too.\n\n## Liens\n- [[proj/b|merged-into]]\n"
+	// A node whose body mixes a human inline wikilink, surrounding prose, a
+	// double-space code line that must survive byte-for-byte, a line-leading
+	// target token, and a managed bullet edge — Unlink removes only edges to
+	// "proj/b" and touches nothing else.
+	code := "    x  =  1  # two-spaced code must survive"
+	body := "See [[proj/b|decided-in]] for context and keep [[proj/c|see-also]] too.\n" +
+		code + "\n" +
+		"[[proj/b|lead]] starts this line.\n" +
+		"\n## Liens\n- [[proj/b|merged-into]]\n"
 	if err := m.Record(ctx, contracts.Node{Key: "proj/a", Kind: contracts.KindProject, Title: "A", Body: body}); err != nil {
 		t.Fatal(err)
 	}
@@ -58,6 +64,15 @@ func TestUnlinkRemovesEdgeAndPreservesProse(t *testing.T) {
 	}
 	if strings.Contains(sg.Root.Body, "[[proj/b") {
 		t.Fatalf("Unlink left a [[proj/b...]] token in the body: %q", sg.Root.Body)
+	}
+	// The unrelated double-spaced code line survives byte-for-byte (no body-wide
+	// whitespace reflow).
+	if !strings.Contains(sg.Root.Body, code) {
+		t.Fatalf("Unlink mutated an unrelated line; want %q intact in %q", code, sg.Root.Body)
+	}
+	// A line-leading token leaves no orphan leading space.
+	if !strings.Contains(sg.Root.Body, "\nstarts this line.") {
+		t.Fatalf("Unlink left an orphan leading space on the line-leading token: %q", sg.Root.Body)
 	}
 
 	// Idempotent: unlinking an absent edge is a no-op, not an error.
