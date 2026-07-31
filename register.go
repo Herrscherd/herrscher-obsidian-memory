@@ -15,6 +15,7 @@ func init() {
 		Manifest: contracts.Manifest{
 			Kind:     "obsidian",
 			Category: contracts.CategoryMemory,
+			Status:   contracts.StatusLive,
 			Config: []contracts.Setting{
 				{Key: "vault", Env: "OBSIDIAN_VAULT", Help: "path to the memory vault directory (default ~/.herrscher/memory)", Required: false},
 				{Key: "node-budget", Env: "OBSIDIAN_NODE_BUDGET", Help: "per-node Body budget in runes; 0 disables (default 2000)", Required: false},
