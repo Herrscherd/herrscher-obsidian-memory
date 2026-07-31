@@ -532,3 +532,32 @@ func TestArchivedExclusion(t *testing.T) {
 		t.Fatalf("archived root not returned by direct Recall: %q", sg.Root.Key)
 	}
 }
+
+// TestRecallHidesTranscriptNeighbor locks the G7 invisible-by-default invariant
+// at the Recall layer: even if a distilled node ever links to a raw transcript
+// node, graph expansion must not surface the transcript body. Recall has no
+// IncludeRaw concept, so the KindTranscript skip is the structural guard.
+func TestRecallHidesTranscriptNeighbor(t *testing.T) {
+	m, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := m.Record(ctx, contracts.Node{Key: "root",
+		Links: []contracts.Link{{To: "raw/s/e-1", Rel: "captured"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Record(ctx, contracts.Node{Key: "raw/s/e-1", Kind: contracts.KindTranscript,
+		Body: "attacker-controlled transcript body"}); err != nil {
+		t.Fatal(err)
+	}
+	sg, err := m.Recall(ctx, "root", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range sg.Nodes {
+		if n.Kind == contracts.KindTranscript {
+			t.Fatalf("raw transcript neighbor leaked into Recall: %q", n.Key)
+		}
+	}
+}

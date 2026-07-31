@@ -251,6 +251,9 @@ func (m *ObsidianMemory) Recall(ctx context.Context, key string, depth int) (con
 				if child.Meta[contracts.MetaState] == contracts.StateArchived {
 					continue // archived neighbor: hide from graph expansion (root is always returned)
 				}
+				if child.Kind == contracts.KindTranscript {
+					continue // raw G7 transcript: never surfaces via graph expansion (invisible by default, no IncludeRaw concept on Recall)
+				}
 				sg.Nodes = append(sg.Nodes, child)
 				next = append(next, child)
 			}
