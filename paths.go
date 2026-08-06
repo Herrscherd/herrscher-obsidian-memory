@@ -6,14 +6,26 @@ import (
 	"strings"
 )
 
-// validKey rejects keys that would escape the vault root or are malformed: empty,
-// absolute, or containing "." / ".." / empty path segments.
+// wikilinkMeta are the runes a key may not contain because a key is not only a
+// path: it is also written into other notes as `[[key]]`, and read back out by a
+// regexp. A key holding "|" would come back with its tail parsed as the link's
+// relation, and one holding "]" would come back truncated — silently, and only on
+// the next read. A newline would move the rest of the key onto its own line. None
+// of these can be escaped: Obsidian's wikilink syntax has no escape.
+const wikilinkMeta = "[]|\r\n"
+
+// validKey rejects keys that would escape the vault root, are malformed (empty,
+// absolute, or containing "." / ".." / empty path segments), or could not survive
+// the round-trip through a wikilink.
 func validKey(key string) error {
 	if key == "" {
 		return fmt.Errorf("obsidian: empty key")
 	}
 	if filepath.IsAbs(key) {
 		return fmt.Errorf("obsidian: absolute key %q", key)
+	}
+	if i := strings.IndexAny(key, wikilinkMeta); i >= 0 {
+		return fmt.Errorf("obsidian: key %q contains %q, which a wikilink cannot carry", key, key[i:i+1])
 	}
 	for _, p := range strings.Split(key, "/") {
 		if p == "" || p == "." || p == ".." {

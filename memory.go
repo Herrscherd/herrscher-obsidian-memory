@@ -149,6 +149,18 @@ func (m *ObsidianMemory) writeNode(n contracts.Node, reloadPrior bool) error {
 	if err := validKey(n.Key); err != nil {
 		return err
 	}
+	// A link target names a node, so it answers to the same rule as a key — and it
+	// needs to, more urgently: the target is what gets written into the body as
+	// `[[to]]`. Refusing here costs the caller an error it can act on; accepting
+	// would store an edge that reads back as a different one, or as none.
+	for _, l := range n.Links {
+		if err := validKey(l.To); err != nil {
+			return fmt.Errorf("obsidian: node %q links to an unusable key: %w", n.Key, err)
+		}
+		if i := strings.IndexAny(l.Rel, wikilinkMeta); i >= 0 {
+			return fmt.Errorf("obsidian: node %q link relation %q contains %q, which a wikilink cannot carry", n.Key, l.Rel, l.Rel[i:i+1])
+		}
+	}
 	// Stamp capturedAt (RFC3339 UTC) so recall can rank by recency. Only when
 	// absent: a caller-supplied value is kept, and on upsert an existing stored
 	// value is preserved so re-recording the same fact does not reset its age.

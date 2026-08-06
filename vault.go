@@ -81,8 +81,8 @@ func marshalNode(n contracts.Node) string {
 // and prose on untouched lines are left exactly as they were.
 func exciseWikilinks(body, to string) string {
 	q := regexp.QuoteMeta(to)
-	tok := `\[\[` + q + `(?:\|[^\]]*)?\]\]`         // a wikilink whose target is `to`
-	targetTok := regexp.MustCompile(tok)            // bare token
+	tok := `\[\[` + q + `(?:\|[^\]]*)?\]\]` // a wikilink whose target is `to`
+	targetTok := regexp.MustCompile(tok)    // bare token
 	bulletOnly := regexp.MustCompile(`^\s*- ` + tok + `\s*$`)
 	spaceThenTok := regexp.MustCompile(`[ \t]` + tok) // " [[to]]" — drop token + its leading space
 	tokThenSpace := regexp.MustCompile(tok + `[ \t]`) // "[[to]] " — line-leading fallback
