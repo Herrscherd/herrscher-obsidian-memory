@@ -2,7 +2,7 @@
 type: user
 title: User — preferences
 ---
-Identity: GitHub Akayashuu, commit email sauvageleo1@gmail.com.
+Identity: GitHub janedoe, commit email jane@example.com.
 Work style: clean code, minimal comments. Prefers clarifying a question over
 guessing.
 
