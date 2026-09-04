@@ -23,6 +23,10 @@ func frontValue(s string) string {
 	return strings.NewReplacer("\r", " ", "\n", " ").Replace(s)
 }
 
+func frontKey(s string) string {
+	return strings.TrimSpace(strings.ReplaceAll(frontValue(s), ":", ""))
+}
+
 func marshalNode(n contracts.Node) string {
 	var b strings.Builder
 	b.WriteString("---\n")
@@ -32,14 +36,14 @@ func marshalNode(n contracts.Node) string {
 	}
 	keys := make([]string, 0, len(n.Meta))
 	for k := range n.Meta {
-		if k == "type" || k == "title" {
+		if fk := frontKey(k); fk == "" || fk == "type" || fk == "title" {
 			continue // reserved for Kind/Title — never let Meta shadow them
 		}
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		b.WriteString(frontValue(k) + ": " + frontValue(n.Meta[k]) + "\n")
+		b.WriteString(frontKey(k) + ": " + frontValue(n.Meta[k]) + "\n")
 	}
 	b.WriteString("---\n")
 

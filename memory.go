@@ -5,10 +5,14 @@ package obsidian
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
+	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -62,14 +66,18 @@ func New(root string) (*ObsidianMemory, error) {
 	if root == "" {
 		return nil, fmt.Errorf("obsidian: empty vault root")
 	}
-	if err := os.MkdirAll(root, 0o755); err != nil {
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return nil, fmt.Errorf("obsidian: resolve vault root: %w", err)
+	}
+	if err := os.MkdirAll(root, 0o700); err != nil {
 		return nil, fmt.Errorf("obsidian: create vault root: %w", err)
 	}
 	r, err := os.OpenRoot(root)
 	if err != nil {
 		return nil, fmt.Errorf("obsidian: open vault root: %w", err)
 	}
-	lf, err := r.OpenFile(lockName, os.O_CREATE|os.O_RDWR, 0o644)
+	lf, err := r.OpenFile(lockName, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		r.Close()
 		return nil, fmt.Errorf("obsidian: open vault lock: %w", err)
@@ -83,23 +91,27 @@ func New(root string) (*ObsidianMemory, error) {
 // the call past ctx; on timeout or a real lock error it logs and proceeds
 // best-effort (the in-process mutex still serializes this process). Callers
 // defer the returned func.
-func (m *ObsidianMemory) flock(ctx context.Context) func() {
+func (m *ObsidianMemory) flock(ctx context.Context) (func(), error) {
 	for {
 		err := lockFD(m.lockFile.Fd())
 		if err == nil {
-			return func() { _ = unlockFD(m.lockFile.Fd()) }
+			return func() { _ = unlockFD(m.lockFile.Fd()) }, nil
 		}
-		if err != syscall.EWOULDBLOCK {
-			fmt.Fprintf(os.Stderr, "obsidian: vault lock: %v\n", err)
-			return func() {}
+		if !errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, fmt.Errorf("obsidian: vault lock: %w", err)
 		}
 		select {
 		case <-ctx.Done():
-			fmt.Fprintf(os.Stderr, "obsidian: vault lock: proceeding without cross-process lock: %v\n", ctx.Err())
-			return func() {}
+			return nil, fmt.Errorf("obsidian: vault lock: %w", ctx.Err())
 		case <-time.After(lockPollInterval):
 		}
 	}
+}
+
+func cloneNode(n contracts.Node) contracts.Node {
+	n.Meta = maps.Clone(n.Meta)
+	n.Links = slices.Clone(n.Links)
+	return n
 }
 
 // SetNodeBudget sets the per-node Body budget in runes; 0 (the default) disables
@@ -164,6 +176,10 @@ func (m *ObsidianMemory) writeNode(n contracts.Node, reloadPrior bool) error {
 	// Stamp capturedAt (RFC3339 UTC) so recall can rank by recency. Only when
 	// absent: a caller-supplied value is kept, and on upsert an existing stored
 	// value is preserved so re-recording the same fact does not reset its age.
+	n.Meta = maps.Clone(n.Meta)
+	if n.Meta == nil {
+		n.Meta = map[string]string{}
+	}
 	if n.Meta["capturedAt"] == "" {
 		at := m.now().UTC().Format(time.RFC3339)
 		if reloadPrior {
@@ -173,9 +189,6 @@ func (m *ObsidianMemory) writeNode(n contracts.Node, reloadPrior bool) error {
 				}
 			}
 		}
-		if n.Meta == nil {
-			n.Meta = map[string]string{}
-		}
 		n.Meta["capturedAt"] = at
 	}
 	// Stamp lastSeen (RFC3339 UTC) — the staleness machine's age basis. Unlike
@@ -183,21 +196,18 @@ func (m *ObsidianMemory) writeNode(n contracts.Node, reloadPrior bool) error {
 	// to now (reactivation), while the curator sweep re-supplies the existing
 	// value so a state-only write leaves the node's age untouched.
 	if n.Meta[contracts.MetaLastSeen] == "" {
-		if n.Meta == nil {
-			n.Meta = map[string]string{}
-		}
 		n.Meta[contracts.MetaLastSeen] = m.now().UTC().Format(time.RFC3339)
 	}
 	rel := keyToRel(n.Key)
 	if dir := filepath.Dir(rel); dir != "." {
-		if err := m.root.MkdirAll(dir, 0o755); err != nil {
+		if err := m.root.MkdirAll(dir, 0o700); err != nil {
 			return fmt.Errorf("obsidian: mkdir for %q: %w", n.Key, err)
 		}
 	}
 	// Write to a temp sibling then rename: rename is atomic on a POSIX
 	// filesystem, so a reader (or a crash) never observes a half-written node.
 	tmp := rel + ".tmp"
-	if err := m.root.WriteFile(tmp, []byte(marshalNode(n)), 0o644); err != nil {
+	if err := m.root.WriteFile(tmp, []byte(marshalNode(n)), 0o600); err != nil {
 		return fmt.Errorf("obsidian: write %q: %w", n.Key, err)
 	}
 	if err := m.root.Rename(tmp, rel); err != nil {
@@ -221,7 +231,11 @@ func (m *ObsidianMemory) Record(ctx context.Context, n contracts.Node) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	defer m.flock(ctx)()
+	release, err := m.flock(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	return m.recordUnlocked(n)
 }
 
@@ -232,7 +246,11 @@ func (m *ObsidianMemory) Record(ctx context.Context, n contracts.Node) error {
 func (m *ObsidianMemory) Recall(ctx context.Context, key string, depth int) (contracts.Subgraph, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	defer m.flock(ctx)()
+	release, err := m.flock(ctx)
+	if err != nil {
+		return contracts.Subgraph{}, err
+	}
+	defer release()
 	root, err := m.loadUnlocked(key)
 	if err != nil {
 		return contracts.Subgraph{}, err
@@ -258,7 +276,10 @@ func (m *ObsidianMemory) Recall(ctx context.Context, key string, depth int) (con
 				seen[l.To] = true
 				child, err := m.loadUnlocked(l.To)
 				if err != nil {
-					continue // dangling link: skip, do not fail the whole recall
+					if errors.Is(err, fs.ErrNotExist) {
+						continue // dangling link: skip, do not fail the whole recall
+					}
+					return contracts.Subgraph{}, fmt.Errorf("obsidian: recall %q: neighbor %q: %w", key, l.To, err)
 				}
 				if child.Meta[contracts.MetaState] == contracts.StateArchived {
 					continue // archived neighbor: hide from graph expansion (root is always returned)
@@ -285,7 +306,11 @@ func (m *ObsidianMemory) Links(ctx context.Context, from, to, rel string) error 
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	defer m.flock(ctx)()
+	release, err := m.flock(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	n, err := m.loadUnlocked(from)
 	if err != nil {
 		return err
@@ -311,7 +336,11 @@ func (m *ObsidianMemory) Unlink(ctx context.Context, from, to string) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	defer m.flock(ctx)()
+	release, err := m.flock(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	n, err := m.loadUnlocked(from)
 	if err != nil {
 		return err
@@ -347,10 +376,15 @@ func (m *ObsidianMemory) Search(ctx context.Context, q contracts.Query) ([]contr
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	defer m.flock(ctx)()
+	release, err := m.flock(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	fsys := m.root.FS()
 	var out []contracts.Node
-	err := fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
+	seen := make(map[string]struct{}, len(m.parseCache))
+	err = fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -360,13 +394,14 @@ func (m *ObsidianMemory) Search(ctx context.Context, q contracts.Query) ([]contr
 		if !d.Type().IsRegular() || !strings.HasSuffix(path, ".md") {
 			return nil // skip dirs, symlinks, and non-markdown
 		}
+		seen[path] = struct{}{}
 		info, err := d.Info()
 		if err != nil {
 			return err
 		}
 		if c, ok := m.parseCache[path]; ok && c.size == info.Size() && c.mod.Equal(info.ModTime()) {
 			if matchesQuery(c.node, q) {
-				out = append(out, c.node)
+				out = append(out, cloneNode(c.node))
 			}
 			return nil
 		}
@@ -377,21 +412,27 @@ func (m *ObsidianMemory) Search(ctx context.Context, q contracts.Query) ([]contr
 		n := unmarshalNode(strings.TrimSuffix(path, ".md"), data)
 		m.parseCache[path] = cachedNode{mod: info.ModTime(), size: info.Size(), node: n}
 		if matchesQuery(n, q) {
-			out = append(out, n)
+			out = append(out, cloneNode(n))
 		}
 		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("obsidian: search: %w", err)
 	}
+	for p := range m.parseCache {
+		if _, ok := seen[p]; !ok {
+			delete(m.parseCache, p)
+		}
+	}
 	if q.Ranked {
-		// matchesQuery already gated membership, so every node here is a genuine
-		// match — ranking only orders them by relevance (highest first), then the
-		// Limit below takes the top-K. A stable sort keeps walk order among ties.
+		now := m.now().UTC()
 		scores := make(map[string]float64, len(out))
 		for _, n := range out {
-			s, _ := contracts.Score(q.Text, m.now().UTC(), n)
-			scores[n.Key] = s
+			if s, textHit := contracts.Score(q.Text, now, n); textHit {
+				scores[n.Key] = s
+				continue
+			}
+			scores[n.Key] = -1 + recencyRank(n, now)/2
 		}
 		sort.SliceStable(out, func(i, j int) bool { return scores[out[i].Key] > scores[out[j].Key] })
 	}
@@ -447,4 +488,16 @@ func matchesQuery(n contracts.Node, q contracts.Query) bool {
 		}
 	}
 	return true
+}
+
+func recencyRank(n contracts.Node, now time.Time) float64 {
+	at, err := time.Parse(time.RFC3339, n.Meta["capturedAt"])
+	if err != nil {
+		return 0
+	}
+	ageDays := now.Sub(at).Hours() / 24
+	if ageDays < 0 {
+		ageDays = 0
+	}
+	return math.Exp(-math.Ln2 * ageDays / 30)
 }

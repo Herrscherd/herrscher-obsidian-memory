@@ -23,7 +23,11 @@ func (m *ObsidianMemory) Locate(ctx context.Context, key string) (contracts.Loca
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	defer m.flock(ctx)()
+	release, err := m.flock(ctx)
+	if err != nil {
+		return contracts.Location{}, err
+	}
+	defer release()
 	rel := keyToRel(key)
 	// Existence via l'*os.Root (jamais d'évasion hors du vault).
 	f, err := m.root.Open(rel)
