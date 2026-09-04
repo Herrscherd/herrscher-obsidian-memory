@@ -29,14 +29,14 @@ func EnsureVault(root string) (*ObsidianMemory, error) {
 // files are non-markdown, so Search/Obsidian/git treat them as vault config, not
 // memory nodes.
 func (m *ObsidianMemory) ensureObsidianDir() error {
-	if err := m.root.MkdirAll(".obsidian", 0o755); err != nil {
+	if err := m.root.MkdirAll(".obsidian", 0o700); err != nil {
 		return fmt.Errorf("obsidian: create .obsidian dir: %w", err)
 	}
 	for _, name := range []string{".obsidian/app.json", ".obsidian/appearance.json"} {
 		if _, err := m.root.Stat(name); err == nil {
 			continue // exists — never overwrite
 		}
-		if err := m.root.WriteFile(name, []byte("{}\n"), 0o644); err != nil {
+		if err := m.root.WriteFile(name, []byte("{}\n"), 0o600); err != nil {
 			return fmt.Errorf("obsidian: write %s: %w", name, err)
 		}
 	}

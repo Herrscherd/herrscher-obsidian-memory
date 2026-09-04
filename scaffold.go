@@ -135,7 +135,11 @@ func (m *ObsidianMemory) ensure(ctx context.Context, n contracts.Node) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	defer m.flock(ctx)()
+	release, err := m.flock(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if _, err := m.root.Stat(keyToRel(n.Key)); err == nil {
 		return nil // exists — never overwrite
 	}

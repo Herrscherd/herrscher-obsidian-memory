@@ -23,7 +23,10 @@ func (m *ObsidianMemory) Delete(ctx context.Context, key string) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	release := m.flock(ctx)
+	release, err := m.flock(ctx)
+	if err != nil {
+		return err
+	}
 	defer release()
 
 	rel := keyToRel(key)
