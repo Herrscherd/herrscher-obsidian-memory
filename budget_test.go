@@ -73,7 +73,7 @@ func TestRecordTranscriptBypassesBudget(t *testing.T) {
 		t.Fatalf("distilled over-budget Record: got %v, want *BudgetError", err)
 	}
 
-	if err := m.Record(ctx, contracts.Node{Key: "raw/s/1", Kind: contracts.KindTranscript, Body: big}); err != nil {
+	if err = m.Record(ctx, contracts.Node{Key: "raw/s/1", Kind: contracts.KindTranscript, Body: big}); err != nil {
 		t.Fatalf("raw over-budget Record must succeed, got %v", err)
 	}
 	got, err := m.Search(ctx, contracts.Query{Text: "xxx", IncludeRaw: true})

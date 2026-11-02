@@ -25,14 +25,14 @@ func EnsureVault(root string) (*ObsidianMemory, error) {
 }
 
 func (m *ObsidianMemory) ensureObsidianDir() error {
-	if err := m.root.MkdirAll(".obsidian", 0o700); err != nil {
+	if err := m.root.MkdirAll(".obsidian", privateDirMode); err != nil {
 		return fmt.Errorf("obsidian: create .obsidian dir: %w", err)
 	}
 	for _, name := range []string{".obsidian/app.json", ".obsidian/appearance.json"} {
 		if _, err := m.root.Stat(name); err == nil {
 			continue
 		}
-		if err := m.root.WriteFile(name, []byte("{}\n"), 0o600); err != nil {
+		if err := m.root.WriteFile(name, []byte("{}\n"), privateFileMode); err != nil {
 			return fmt.Errorf("obsidian: write %s: %w", name, err)
 		}
 	}

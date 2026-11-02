@@ -85,26 +85,26 @@ func TestRecallSurfacesNonNotExistNeighborError(t *testing.T) {
 		t.Fatal(err)
 	}
 	closeOnCleanup(t, m)
-	if err := m.Record(ctx, contracts.Node{Key: "a/one", Kind: contracts.KindDecision, Links: []contracts.Link{{To: "a/two", Rel: "sees"}}}); err != nil {
+	if err = m.Record(ctx, contracts.Node{Key: "a/one", Kind: contracts.KindDecision, Links: []contracts.Link{{To: "a/two", Rel: "sees"}}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.Record(ctx, contracts.Node{Key: "a/two", Kind: contracts.KindDecision}); err != nil {
+	if err = m.Record(ctx, contracts.Node{Key: "a/two", Kind: contracts.KindDecision}); err != nil {
 		t.Fatal(err)
 	}
 	unreadable := filepath.Join(dir, "a", "two.md")
-	if err := os.Chmod(unreadable, 0o000); err != nil {
+	if err = os.Chmod(unreadable, 0o000); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if err := os.Chmod(unreadable, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err = os.Chmod(unreadable, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
 			t.Error(err)
 		}
 	})
-	if _, err := m.Recall(ctx, "a/one", 1); err == nil {
+	if _, err = m.Recall(ctx, "a/one", 1); err == nil {
 		t.Fatal("Recall swallowed an unreadable neighbor")
 	}
 
-	if err := os.Remove(unreadable); err != nil {
+	if err = os.Remove(unreadable); err != nil {
 		t.Fatal(err)
 	}
 	sg, err := m.Recall(ctx, "a/one", 1)
@@ -192,7 +192,7 @@ func TestWritesFailWhenLockCannotBeTaken(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if err := release(); err != nil {
+		if err = release(); err != nil {
 			t.Error(err)
 		}
 	})
@@ -297,7 +297,7 @@ func TestLocateReturnsAbsoluteFileURIFromRelativeRoot(t *testing.T) {
 	}
 	t.Chdir(t.TempDir())
 	t.Cleanup(func() {
-		if err := os.Chdir(wd); err != nil {
+		if err = os.Chdir(wd); err != nil {
 			t.Error(err)
 		}
 	})
@@ -306,7 +306,7 @@ func TestLocateReturnsAbsoluteFileURIFromRelativeRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	closeOnCleanup(t, m)
-	if err := m.Record(ctx, contracts.Node{Key: "acme/fact", Kind: contracts.KindDecision}); err != nil {
+	if err = m.Record(ctx, contracts.Node{Key: "acme/fact", Kind: contracts.KindDecision}); err != nil {
 		t.Fatal(err)
 	}
 	loc, err := m.Locate(ctx, "acme/fact")

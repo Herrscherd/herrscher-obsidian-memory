@@ -15,7 +15,7 @@ func TestLocateExistingNode(t *testing.T) {
 		t.Fatal(err)
 	}
 	closeOnCleanup(t, m)
-	if err := m.Record(context.Background(), contracts.Node{Key: "acme/proj/fact", Kind: contracts.KindDecision, Title: "F"}); err != nil {
+	if err = m.Record(context.Background(), contracts.Node{Key: "acme/proj/fact", Kind: contracts.KindDecision, Title: "F"}); err != nil {
 		t.Fatal(err)
 	}
 	loc, err := m.Locate(context.Background(), "acme/proj/fact")
@@ -53,7 +53,7 @@ func TestLocateEncodesSpacesInPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	closeOnCleanup(t, m)
-	if err := m.Record(context.Background(), contracts.Node{Key: "a/b", Kind: contracts.KindDecision}); err != nil {
+	if err = m.Record(context.Background(), contracts.Node{Key: "a/b", Kind: contracts.KindDecision}); err != nil {
 		t.Fatal(err)
 	}
 	loc, err := m.Locate(context.Background(), "a/b")

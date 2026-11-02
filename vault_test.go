@@ -15,7 +15,7 @@ func TestMarshalUnmarshalRoundTrip(t *testing.T) {
 		Body:  "The modular AI harness.\n\nSee [[herrscher/repos/contracts|depends-on]].\n",
 		Links: []contracts.Link{
 			{To: "herrscher/repos/contracts", Rel: "depends-on"},
-			{To: "herrscher/repos/gateway", Rel: "contains"},
+			{To: "herrscher/repos/gateway", Rel: relContains},
 		},
 		Meta: map[string]string{"tags": "platform, go", "status": "active"},
 	}

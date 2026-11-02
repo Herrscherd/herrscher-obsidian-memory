@@ -109,7 +109,7 @@ func TestRecallFollowsLinksToDepth(t *testing.T) {
 	}))
 	must(t, m.Record(ctx, contracts.Node{
 		Key: "b", Kind: contracts.KindRepo,
-		Links: []contracts.Link{{To: "c", Rel: "contains"}},
+		Links: []contracts.Link{{To: "c", Rel: relContains}},
 	}))
 	must(t, m.Record(ctx, contracts.Node{Key: "c", Kind: contracts.KindRepo}))
 
@@ -221,7 +221,7 @@ func TestLinksCreatesEdgeVisibleToRecall(t *testing.T) {
 	must(t, m.Record(ctx, contracts.Node{Key: "a", Kind: contracts.KindProject}))
 	must(t, m.Record(ctx, contracts.Node{Key: "b", Kind: contracts.KindRepo}))
 
-	if err := m.Links(ctx, "a", "b", "contains"); err != nil {
+	if err := m.Links(ctx, "a", "b", relContains); err != nil {
 		t.Fatalf("Links: %v", err)
 	}
 	sg, err := m.Recall(ctx, "a", 1)
@@ -241,8 +241,8 @@ func TestLinksIsIdempotent(t *testing.T) {
 	m := newTestMem(t)
 	ctx := context.Background()
 	must(t, m.Record(ctx, contracts.Node{Key: "a", Kind: contracts.KindProject}))
-	must(t, m.Links(ctx, "a", "b", "contains"))
-	must(t, m.Links(ctx, "a", "b", "contains"))
+	must(t, m.Links(ctx, "a", "b", relContains))
+	must(t, m.Links(ctx, "a", "b", relContains))
 	n, err := m.load("a")
 	must(t, err)
 	count := 0
@@ -261,7 +261,7 @@ func TestLinksKeepsExistingRelOnTarget(t *testing.T) {
 	ctx := context.Background()
 	must(t, m.Record(ctx, contracts.Node{Key: "a", Kind: contracts.KindProject}))
 	must(t, m.Links(ctx, "a", "b", "depends-on"))
-	must(t, m.Links(ctx, "a", "b", "contains"))
+	must(t, m.Links(ctx, "a", "b", relContains))
 	n, err := m.load("a")
 	must(t, err)
 	if len(n.Links) != 1 || n.Links[0].To != "b" || n.Links[0].Rel != "depends-on" {
@@ -279,7 +279,7 @@ func TestCancelledContextIsHonored(t *testing.T) {
 	if _, err := m.Search(ctx, contracts.Query{}); err == nil {
 		t.Fatalf("Search should respect a cancelled context")
 	}
-	if err := m.Links(ctx, "a", "b", "contains"); err == nil {
+	if err := m.Links(ctx, "a", "b", relContains); err == nil {
 		t.Fatalf("Links should respect a cancelled context")
 	}
 }
@@ -291,10 +291,10 @@ func TestRecordIsAtomicNoTempLeftBehind(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	ctx := context.Background()
-	if err := m.Record(ctx, contracts.Node{Key: "a/b", Kind: contracts.KindRepo, Title: "T"}); err != nil {
+	if err = m.Record(ctx, contracts.Node{Key: "a/b", Kind: contracts.KindRepo, Title: "T"}); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "a", "b.md.tmp")); !os.IsNotExist(err) {
+	if _, err = os.Stat(filepath.Join(dir, "a", "b.md.tmp")); !os.IsNotExist(err) {
 		t.Fatalf("temp file left behind after Record: err=%v", err)
 	}
 	n, err := m.load("a/b")
@@ -309,7 +309,7 @@ func TestVaultLockFileIsHiddenFromSearch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, lockName)); err != nil {
+	if _, err = os.Stat(filepath.Join(dir, lockName)); err != nil {
 		t.Fatalf("lock file not created: %v", err)
 	}
 	must(t, m.Record(context.Background(), contracts.Node{Key: "x", Kind: contracts.KindProject, Body: "lock"}))
@@ -331,7 +331,7 @@ func TestConcurrentLinksAllLand(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			must(t, m.Links(ctx, "a", fmt.Sprintf("b%d", i), "contains"))
+			must(t, m.Links(ctx, "a", fmt.Sprintf("b%d", i), relContains))
 		}(i)
 	}
 	wg.Wait()
@@ -352,10 +352,10 @@ func TestSearchIgnoresSymlinkEscape(t *testing.T) {
 	must(t, m.Record(ctx, contracts.Node{Key: "real", Kind: contracts.KindProject, Body: "inside"}))
 
 	secret := filepath.Join(t.TempDir(), "secret.md")
-	if err := os.WriteFile(secret, []byte("---\ntype: user\n---\nTOP SECRET\n"), 0o644); err != nil {
+	if err = os.WriteFile(secret, []byte("---\ntype: user\n---\nTOP SECRET\n"), 0o644); err != nil {
 		t.Fatalf("write secret: %v", err)
 	}
-	if err := os.Symlink(secret, filepath.Join(dir, "leak.md")); err != nil {
+	if err = os.Symlink(secret, filepath.Join(dir, "leak.md")); err != nil {
 		t.Skipf("symlink unsupported: %v", err)
 	}
 	res, err := m.Search(ctx, contracts.Query{Text: "secret"})
@@ -477,7 +477,7 @@ func TestSearch_UnrankedReturnsAllMatches(t *testing.T) {
 	m := newTestMem(t)
 	ctx := context.Background()
 	must(t, m.Record(ctx, contracts.Node{Key: "a", Kind: contracts.KindDecision, Title: "nats", Body: "x"}))
-	must(t, m.Record(ctx, contracts.Node{Key: "b", Kind: contracts.KindDecision, Title: "nats deep", Body: "nats nats"}))
+	must(t, m.Record(ctx, contracts.Node{Key: "b", Kind: contracts.KindDecision, Title: "nats deep", Body: "deep dive"}))
 	got, err := m.Search(ctx, contracts.Query{Text: "nats"})
 	if err != nil {
 		t.Fatal(err)
@@ -496,7 +496,7 @@ func TestWriteNodeStampsAndBumpsLastSeen(t *testing.T) {
 	m.now = func() time.Time { return t0 }
 
 	ctx := context.Background()
-	if err := m.Record(ctx, contracts.Node{Key: "n1", Body: "hello"}); err != nil {
+	if err = m.Record(ctx, contracts.Node{Key: "n1", Body: "hello"}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := m.Recall(ctx, "n1", 0)
@@ -510,7 +510,7 @@ func TestWriteNodeStampsAndBumpsLastSeen(t *testing.T) {
 
 	t1 := t0.Add(48 * time.Hour)
 	m.now = func() time.Time { return t1 }
-	if err := m.Record(ctx, contracts.Node{Key: "n1", Body: "hello again"}); err != nil {
+	if err = m.Record(ctx, contracts.Node{Key: "n1", Body: "hello again"}); err != nil {
 		t.Fatal(err)
 	}
 	got, err = m.Recall(ctx, "n1", 0)
@@ -530,7 +530,7 @@ func TestWriteNodeHonorsSuppliedLastSeen(t *testing.T) {
 	}
 	m.now = func() time.Time { return time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC) }
 	supplied := "2020-01-02T03:04:05Z"
-	if err := m.Record(context.Background(), contracts.Node{
+	if err = m.Record(context.Background(), contracts.Node{
 		Key: "n2", Body: "x", Meta: map[string]string{contracts.MetaLastSeen: supplied},
 	}); err != nil {
 		t.Fatal(err)
@@ -550,13 +550,13 @@ func TestArchivedExclusion(t *testing.T) {
 	ctx := context.Background()
 	archived := map[string]string{contracts.MetaState: contracts.StateArchived}
 
-	if err := m.Record(ctx, contracts.Node{
+	if err = m.Record(ctx, contracts.Node{
 		Key: "root", Body: "keyword root",
 		Links: []contracts.Link{{To: "old", Rel: "rel"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.Record(ctx, contracts.Node{Key: "old", Body: "keyword old", Meta: archived}); err != nil {
+	if err = m.Record(ctx, contracts.Node{Key: "old", Body: "keyword old", Meta: archived}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -606,13 +606,13 @@ func TestRecallHidesTranscriptNeighbor(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	if err := m.Record(ctx, contracts.Node{
+	if err = m.Record(ctx, contracts.Node{
 		Key:   "root",
 		Links: []contracts.Link{{To: "raw/s/e-1", Rel: "captured"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.Record(ctx, contracts.Node{
+	if err = m.Record(ctx, contracts.Node{
 		Key: "raw/s/e-1", Kind: contracts.KindTranscript,
 		Body: "attacker-controlled transcript body",
 	}); err != nil {

@@ -136,7 +136,7 @@ func TestInitWithDomainScaffoldsDomainNodeAndLinks(t *testing.T) {
 	}
 	foundContains := false
 	for _, l := range dom.Links {
-		if l.To == "projets/proj/index" && l.Rel == "contains" {
+		if l.To == "projets/proj/index" && l.Rel == relContains {
 			foundContains = true
 		}
 	}

@@ -51,7 +51,7 @@ func (m *ObsidianMemory) Init(ctx context.Context, s InitSpec) error {
 		}); err != nil {
 			return err
 		}
-		if err := m.Links(ctx, orgKey, base+"/index", "contains"); err != nil {
+		if err := m.Links(ctx, orgKey, base+"/index", relContains); err != nil {
 			return err
 		}
 	}
@@ -59,16 +59,16 @@ func (m *ObsidianMemory) Init(ctx context.Context, s InitSpec) error {
 	projKey := base + "/index"
 	projLinks := make([]contracts.Link, 0, 4+len(s.Repos)+len(s.Servers))
 	if s.Org != "" {
-		projLinks = append(projLinks, contracts.Link{To: slug(s.Org) + "/index", Rel: "belongs-to"})
+		projLinks = append(projLinks, contracts.Link{To: slug(s.Org) + "/index", Rel: relBelongsTo})
 	}
 	projLinks = append(projLinks,
-		contracts.Link{To: base + "/architecture", Rel: "contains"},
-		contracts.Link{To: base + "/production", Rel: "contains"})
+		contracts.Link{To: base + "/architecture", Rel: relContains},
+		contracts.Link{To: base + "/production", Rel: relContains})
 	for _, r := range s.Repos {
-		projLinks = append(projLinks, contracts.Link{To: base + "/repos/" + slug(r), Rel: "contains"})
+		projLinks = append(projLinks, contracts.Link{To: base + "/repos/" + slug(r), Rel: relContains})
 	}
 	for _, sv := range s.Servers {
-		projLinks = append(projLinks, contracts.Link{To: base + "/servers/" + slug(sv), Rel: "contains"})
+		projLinks = append(projLinks, contracts.Link{To: base + "/servers/" + slug(sv), Rel: relContains})
 	}
 	if domainKey != "" {
 		projLinks = append(projLinks, contracts.Link{To: domainKey, Rel: "in-domain"})
@@ -90,19 +90,19 @@ func (m *ObsidianMemory) Init(ctx context.Context, s InitSpec) error {
 		}); err != nil {
 			return err
 		}
-		if err := m.Links(ctx, domainKey, projKey, "contains"); err != nil {
+		if err := m.Links(ctx, domainKey, projKey, relContains); err != nil {
 			return err
 		}
 	}
 	if err := m.ensure(ctx, contracts.Node{
 		Key: base + "/architecture", Kind: contracts.KindArchitecture,
-		Title: s.Project + ": architecture", Links: []contracts.Link{{To: projKey, Rel: "belongs-to"}},
+		Title: s.Project + ": architecture", Links: []contracts.Link{{To: projKey, Rel: relBelongsTo}},
 	}); err != nil {
 		return err
 	}
 	if err := m.ensure(ctx, contracts.Node{
 		Key: base + "/production", Kind: contracts.KindProduction,
-		Title: s.Project + ": production", Links: []contracts.Link{{To: projKey, Rel: "belongs-to"}},
+		Title: s.Project + ": production", Links: []contracts.Link{{To: projKey, Rel: relBelongsTo}},
 	}); err != nil {
 		return err
 	}
@@ -110,7 +110,7 @@ func (m *ObsidianMemory) Init(ctx context.Context, s InitSpec) error {
 	for _, r := range s.Repos {
 		if err := m.ensure(ctx, contracts.Node{
 			Key: base + "/repos/" + slug(r), Kind: contracts.KindRepo,
-			Title: r, Links: []contracts.Link{{To: projKey, Rel: "belongs-to"}},
+			Title: r, Links: []contracts.Link{{To: projKey, Rel: relBelongsTo}},
 		}); err != nil {
 			return err
 		}
@@ -118,7 +118,7 @@ func (m *ObsidianMemory) Init(ctx context.Context, s InitSpec) error {
 	for _, sv := range s.Servers {
 		if err := m.ensure(ctx, contracts.Node{
 			Key: base + "/servers/" + slug(sv), Kind: contracts.KindServer,
-			Title: sv, Links: []contracts.Link{{To: projKey, Rel: "belongs-to"}},
+			Title: sv, Links: []contracts.Link{{To: projKey, Rel: relBelongsTo}},
 		}); err != nil {
 			return err
 		}

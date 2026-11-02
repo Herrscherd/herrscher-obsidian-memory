@@ -12,6 +12,11 @@ var wikilinkRe = regexp.MustCompile(`\[\[([^\]|]+)(?:\|([^\]]+))?\]\]`)
 
 const liensHeader = "## Liens"
 
+const (
+	relContains  = "contains"
+	relBelongsTo = "belongs-to"
+)
+
 var liensHeaderRe = regexp.MustCompile(`(?m)^## Liens[ \t]*$`)
 
 func frontValue(s string) string {
@@ -128,7 +133,7 @@ func unmarshalNode(key string, data []byte) contracts.Node {
 	return n
 }
 
-func splitFrontmatter(s string) (front, body string, ok bool) {
+func splitFrontmatter(s string) (string, string, bool) {
 	if !strings.HasPrefix(s, "---\n") {
 		return "", s, false
 	}

@@ -27,6 +27,14 @@ const lockName = ".herrscher.lock"
 
 const lockPollInterval = 10 * time.Millisecond
 
+const (
+	privateDirMode      fs.FileMode = 0o700
+	privateFileMode     fs.FileMode = 0o600
+	recencyWeight                   = 0.5
+	recencyHalfLifeDays             = 30
+	hoursPerDay                     = 24
+)
+
 // ObsidianMemory implements contracts.Memory over a markdown vault. All file I/O
 // goes through an *os.Root so a malicious key or an in-vault symlink can never
 // escape the root. The mutex serializes writes within this process; lockFile
@@ -59,14 +67,14 @@ func New(root string) (*ObsidianMemory, error) {
 	if err != nil {
 		return nil, fmt.Errorf("obsidian: resolve vault root: %w", err)
 	}
-	if err := os.MkdirAll(root, 0o700); err != nil {
+	if err = os.MkdirAll(root, privateDirMode); err != nil {
 		return nil, fmt.Errorf("obsidian: create vault root: %w", err)
 	}
 	r, err := os.OpenRoot(root)
 	if err != nil {
 		return nil, fmt.Errorf("obsidian: open vault root: %w", err)
 	}
-	lf, err := r.OpenFile(lockName, os.O_CREATE|os.O_RDWR, 0o600)
+	lf, err := r.OpenFile(lockName, os.O_CREATE|os.O_RDWR, privateFileMode)
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("obsidian: open vault lock: %w", err), r.Close())
 	}
@@ -161,12 +169,12 @@ func (m *ObsidianMemory) writeNode(n contracts.Node, reloadPrior bool) error {
 	}
 	rel := keyToRel(n.Key)
 	if dir := filepath.Dir(rel); dir != "." {
-		if err := m.root.MkdirAll(dir, 0o700); err != nil {
+		if err := m.root.MkdirAll(dir, privateDirMode); err != nil {
 			return fmt.Errorf("obsidian: mkdir for %q: %w", n.Key, err)
 		}
 	}
 	tmp := rel + ".tmp"
-	if err := m.root.WriteFile(tmp, []byte(marshalNode(n)), 0o600); err != nil {
+	if err := m.root.WriteFile(tmp, []byte(marshalNode(n)), privateFileMode); err != nil {
 		return fmt.Errorf("obsidian: write %q: %w", n.Key, err)
 	}
 	if err := m.root.Rename(tmp, rel); err != nil {
@@ -438,7 +446,7 @@ func rankByRelevance(out []contracts.Node, text string, now time.Time) {
 			scores[n.Key] = s
 			continue
 		}
-		scores[n.Key] = -1 + recencyRank(n, now)/2
+		scores[n.Key] = -1 + recencyRank(n, now)*recencyWeight
 	}
 	sort.SliceStable(out, func(i, j int) bool { return scores[out[i].Key] > scores[out[j].Key] })
 }
@@ -496,9 +504,9 @@ func recencyRank(n contracts.Node, now time.Time) float64 {
 	if err != nil {
 		return 0
 	}
-	ageDays := now.Sub(at).Hours() / 24
+	ageDays := now.Sub(at).Hours() / hoursPerDay
 	if ageDays < 0 {
 		ageDays = 0
 	}
-	return math.Exp(-math.Ln2 * ageDays / 30)
+	return math.Exp(-math.Ln2 * ageDays / recencyHalfLifeDays)
 }

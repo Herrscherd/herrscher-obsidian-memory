@@ -18,12 +18,12 @@ func TestEnsureVaultCreatesObsidianConfig(t *testing.T) {
 	closeOnCleanup(t, m)
 
 	for _, name := range []string{".obsidian/app.json", ".obsidian/appearance.json"} {
-		if _, err := os.Stat(filepath.Join(root, name)); err != nil {
+		if _, err = os.Stat(filepath.Join(root, name)); err != nil {
 			t.Fatalf("expected %s to exist: %v", name, err)
 		}
 	}
 
-	if err := m.Record(context.Background(), contracts.Node{Key: "n", Kind: contracts.KindDecision, Title: "t"}); err != nil {
+	if err = m.Record(context.Background(), contracts.Node{Key: "n", Kind: contracts.KindDecision, Title: "t"}); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
 	sg, err := m.Recall(context.Background(), "n", 0)
@@ -68,10 +68,10 @@ func TestEnsureAgentAndProjectAreIdempotent(t *testing.T) {
 
 	var p contracts.Provisioner = m
 
-	if err := p.EnsureProject(ctx, contracts.ProjectKey("game"), "game"); err != nil {
+	if err = p.EnsureProject(ctx, contracts.ProjectKey("game"), "game"); err != nil {
 		t.Fatalf("EnsureProject: %v", err)
 	}
-	if err := p.EnsureAgent(ctx, contracts.AgentKey("scripter"), "scripter"); err != nil {
+	if err = p.EnsureAgent(ctx, contracts.AgentKey("scripter"), "scripter"); err != nil {
 		t.Fatalf("EnsureAgent: %v", err)
 	}
 
@@ -80,10 +80,10 @@ func TestEnsureAgentAndProjectAreIdempotent(t *testing.T) {
 		t.Fatalf("load project: %v", err)
 	}
 	proj.Body = "hand-edited"
-	if err := m.Record(ctx, proj); err != nil {
+	if err = m.Record(ctx, proj); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
-	if err := p.EnsureProject(ctx, contracts.ProjectKey("game"), "game"); err != nil {
+	if err = p.EnsureProject(ctx, contracts.ProjectKey("game"), "game"); err != nil {
 		t.Fatalf("EnsureProject (2nd): %v", err)
 	}
 	got, err := m.load(contracts.ProjectKey("game"))
