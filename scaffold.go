@@ -23,79 +23,79 @@ type InitSpec struct {
 	Servers []string
 }
 
-func (s InitSpec) base() string {
-	if s.Org != "" {
-		return slug(s.Org) + "/" + slug(s.Project)
+func (spec InitSpec) base() string {
+	if spec.Org != "" {
+		return slug(spec.Org) + "/" + slug(spec.Project)
 	}
-	return "projets/" + slug(s.Project)
+	return "projets/" + slug(spec.Project)
 }
 
 // Init scaffolds the canonical layout. It only writes nodes that do not yet exist
 // (idempotent, never overwrites), and links children to their parents.
-func (m *ObsidianMemory) Init(ctx context.Context, s InitSpec) error {
-	if s.Project == "" {
+func (m *ObsidianMemory) Init(ctx context.Context, spec InitSpec) error {
+	if spec.Project == "" {
 		return ErrNoProject
 	}
-	base := s.base()
-	domainKey := s.domainKey()
+	base := spec.base()
+	domainKey := spec.domainKey()
 	projKey := base + "/index"
-	if err := m.ensureOrg(ctx, s, base); err != nil {
+	if err := m.ensureOrg(ctx, spec, base); err != nil {
 		return err
 	}
-	if err := m.ensure(ctx, projectNode(s, base, domainKey)); err != nil {
+	if err := m.ensure(ctx, projectNode(spec, base, domainKey)); err != nil {
 		return err
 	}
-	if err := m.ensureDomain(ctx, s, domainKey, projKey); err != nil {
+	if err := m.ensureDomain(ctx, spec, domainKey, projKey); err != nil {
 		return err
 	}
-	return m.ensureAll(ctx, childNodes(s, base, projKey))
+	return m.ensureAll(ctx, childNodes(spec, base, projKey))
 }
 
-func (s InitSpec) domainKey() string {
-	if s.Domain == "" {
+func (spec InitSpec) domainKey() string {
+	if spec.Domain == "" {
 		return ""
 	}
-	return "domaines/" + slug(s.Domain) + "/index"
+	return "domaines/" + slug(spec.Domain) + "/index"
 }
 
-func (m *ObsidianMemory) ensureOrg(ctx context.Context, s InitSpec, base string) error {
-	if s.Org == "" {
+func (m *ObsidianMemory) ensureOrg(ctx context.Context, spec InitSpec, base string) error {
+	if spec.Org == "" {
 		return nil
 	}
-	orgKey := slug(s.Org) + "/index"
+	orgKey := slug(spec.Org) + "/index"
 	if err := m.ensure(ctx, contracts.Node{
 		Key: orgKey, Kind: contracts.KindOrganization,
-		Title: s.Org,
+		Title: spec.Org,
 	}); err != nil {
 		return err
 	}
 	return m.Links(ctx, orgKey, base+"/index", relContains)
 }
 
-func projectNode(s InitSpec, base, domainKey string) contracts.Node {
+func projectNode(spec InitSpec, base, domainKey string) contracts.Node {
 	node := contracts.Node{
 		Key: base + "/index", Kind: contracts.KindProject,
-		Title: s.Project, Links: projectLinks(s, base, domainKey),
+		Title: spec.Project, Links: projectLinks(spec, base, domainKey),
 	}
-	if s.Domain != "" {
-		node.Meta = map[string]string{"domain": s.Domain}
+	if spec.Domain != "" {
+		node.Meta = map[string]string{"domain": spec.Domain}
 	}
 	return node
 }
 
-func projectLinks(s InitSpec, base, domainKey string) []contracts.Link {
-	links := make([]contracts.Link, 0, 4+len(s.Repos)+len(s.Servers))
-	if s.Org != "" {
-		links = append(links, contracts.Link{To: slug(s.Org) + "/index", Rel: relBelongsTo})
+func projectLinks(spec InitSpec, base, domainKey string) []contracts.Link {
+	links := make([]contracts.Link, 0, 4+len(spec.Repos)+len(spec.Servers))
+	if spec.Org != "" {
+		links = append(links, contracts.Link{To: slug(spec.Org) + "/index", Rel: relBelongsTo})
 	}
 	links = append(links,
 		contracts.Link{To: base + "/architecture", Rel: relContains},
 		contracts.Link{To: base + "/production", Rel: relContains})
-	for _, r := range s.Repos {
-		links = append(links, contracts.Link{To: base + "/repos/" + slug(r), Rel: relContains})
+	for _, repo := range spec.Repos {
+		links = append(links, contracts.Link{To: base + "/repos/" + slug(repo), Rel: relContains})
 	}
-	for _, sv := range s.Servers {
-		links = append(links, contracts.Link{To: base + "/servers/" + slug(sv), Rel: relContains})
+	for _, server := range spec.Servers {
+		links = append(links, contracts.Link{To: base + "/servers/" + slug(server), Rel: relContains})
 	}
 	if domainKey != "" {
 		links = append(links, contracts.Link{To: domainKey, Rel: "in-domain"})
@@ -103,40 +103,40 @@ func projectLinks(s InitSpec, base, domainKey string) []contracts.Link {
 	return links
 }
 
-func (m *ObsidianMemory) ensureDomain(ctx context.Context, s InitSpec, domainKey, projKey string) error {
-	if s.Domain == "" {
+func (m *ObsidianMemory) ensureDomain(ctx context.Context, spec InitSpec, domainKey, projKey string) error {
+	if spec.Domain == "" {
 		return nil
 	}
 	if err := m.ensure(ctx, contracts.Node{
 		Key: domainKey, Kind: contracts.KindDomain,
-		Title: s.Domain,
+		Title: spec.Domain,
 	}); err != nil {
 		return err
 	}
 	return m.Links(ctx, domainKey, projKey, relContains)
 }
 
-func childNodes(s InitSpec, base, projKey string) []contracts.Node {
+func childNodes(spec InitSpec, base, projKey string) []contracts.Node {
 	nodes := []contracts.Node{
 		{
 			Key: base + "/architecture", Kind: contracts.KindArchitecture,
-			Title: s.Project + ": architecture", Links: belongsTo(projKey),
+			Title: spec.Project + ": architecture", Links: belongsTo(projKey),
 		},
 		{
 			Key: base + "/production", Kind: contracts.KindProduction,
-			Title: s.Project + ": production", Links: belongsTo(projKey),
+			Title: spec.Project + ": production", Links: belongsTo(projKey),
 		},
 	}
-	for _, r := range s.Repos {
+	for _, repo := range spec.Repos {
 		nodes = append(nodes, contracts.Node{
-			Key: base + "/repos/" + slug(r), Kind: contracts.KindRepo,
-			Title: r, Links: belongsTo(projKey),
+			Key: base + "/repos/" + slug(repo), Kind: contracts.KindRepo,
+			Title: repo, Links: belongsTo(projKey),
 		})
 	}
-	for _, sv := range s.Servers {
+	for _, server := range spec.Servers {
 		nodes = append(nodes, contracts.Node{
-			Key: base + "/servers/" + slug(sv), Kind: contracts.KindServer,
-			Title: sv, Links: belongsTo(projKey),
+			Key: base + "/servers/" + slug(server), Kind: contracts.KindServer,
+			Title: server, Links: belongsTo(projKey),
 		})
 	}
 	return nodes
@@ -147,15 +147,15 @@ func belongsTo(projKey string) []contracts.Link {
 }
 
 func (m *ObsidianMemory) ensureAll(ctx context.Context, nodes []contracts.Node) error {
-	for _, n := range nodes {
-		if err := m.ensure(ctx, n); err != nil {
+	for _, node := range nodes {
+		if err := m.ensure(ctx, node); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (m *ObsidianMemory) ensure(ctx context.Context, n contracts.Node) error {
+func (m *ObsidianMemory) ensure(ctx context.Context, node contracts.Node) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -165,13 +165,13 @@ func (m *ObsidianMemory) ensure(ctx context.Context, n contracts.Node) error {
 	if err != nil {
 		return err
 	}
-	err = m.ensureUnlocked(n)
+	err = m.ensureUnlocked(node)
 	return errors.Join(err, release())
 }
 
-func (m *ObsidianMemory) ensureUnlocked(n contracts.Node) error {
-	if _, err := m.root.Stat(keyToRel(n.Key)); err == nil {
+func (m *ObsidianMemory) ensureUnlocked(node contracts.Node) error {
+	if _, err := m.root.Stat(keyToRel(node.Key)); err == nil {
 		return nil
 	}
-	return m.recordUnlockedNoReload(n)
+	return m.recordUnlockedNoReload(node)
 }

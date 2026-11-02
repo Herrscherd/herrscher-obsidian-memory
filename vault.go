@@ -19,25 +19,25 @@ const (
 
 var liensHeaderRe = regexp.MustCompile(`(?m)^## Liens[ \t]*$`)
 
-func frontValue(s string) string {
-	return strings.NewReplacer("\r", " ", "\n", " ").Replace(s)
+func frontValue(text string) string {
+	return strings.NewReplacer("\r", " ", "\n", " ").Replace(text)
 }
 
-func frontKey(s string) string {
-	return strings.TrimSpace(strings.ReplaceAll(frontValue(s), ":", ""))
+func frontKey(text string) string {
+	return strings.TrimSpace(strings.ReplaceAll(frontValue(text), ":", ""))
 }
 
-func marshalNode(n contracts.Node) string {
-	return frontMatter(n) + withMissingLinks(n.Body, n.Links)
+func marshalNode(node contracts.Node) string {
+	return frontMatter(node) + withMissingLinks(node.Body, node.Links)
 }
 
-func frontMatter(n contracts.Node) string {
-	lines := []string{"---", "type: " + string(n.Kind)}
-	if n.Title != "" {
-		lines = append(lines, "title: "+frontValue(n.Title))
+func frontMatter(node contracts.Node) string {
+	lines := []string{"---", "type: " + string(node.Kind)}
+	if node.Title != "" {
+		lines = append(lines, "title: "+frontValue(node.Title))
 	}
-	for _, k := range writableMetaKeys(n.Meta) {
-		lines = append(lines, frontKey(k)+": "+frontValue(n.Meta[k]))
+	for _, metaKey := range writableMetaKeys(node.Meta) {
+		lines = append(lines, frontKey(metaKey)+": "+frontValue(node.Meta[metaKey]))
 	}
 	lines = append(lines, "---")
 	return strings.Join(lines, "\n") + "\n"
@@ -45,11 +45,11 @@ func frontMatter(n contracts.Node) string {
 
 func writableMetaKeys(meta map[string]string) []string {
 	keys := make([]string, 0, len(meta))
-	for k := range meta {
-		if fk := frontKey(k); fk == "" || fk == "type" || fk == "title" {
+	for metaKey := range meta {
+		if fk := frontKey(metaKey); fk == "" || fk == "type" || fk == "title" {
 			continue
 		}
-		keys = append(keys, k)
+		keys = append(keys, metaKey)
 	}
 	sort.Strings(keys)
 	return keys
@@ -76,16 +76,16 @@ func missingLinkLines(body string, links []contracts.Link) []string {
 		present[m[1]] = true
 	}
 	missing := make([]string, 0, len(links))
-	for _, l := range links {
-		if present[l.To] {
+	for _, link := range links {
+		if present[link.To] {
 			continue
 		}
-		tag := l.To
-		if l.Rel != "" {
-			tag += "|" + l.Rel
+		tag := link.To
+		if link.Rel != "" {
+			tag += "|" + link.Rel
 		}
 		missing = append(missing, "- [["+tag+"]]")
-		present[l.To] = true
+		present[link.To] = true
 	}
 	return missing
 }
@@ -117,63 +117,63 @@ func exciseWikilinks(body, to string) string {
 }
 
 func unmarshalNode(key string, data []byte) contracts.Node {
-	n := contracts.Node{Key: key, Meta: make(map[string]string)}
-	s := string(data)
+	node := contracts.Node{Key: key, Meta: make(map[string]string)}
+	text := string(data)
 
-	split, ok := splitFrontmatter(s)
+	split, ok := splitFrontmatter(text)
 	front, body := split.front, split.body
 	if ok {
 		for _, line := range strings.Split(front, "\n") {
-			k, v, ok := strings.Cut(line, ":")
+			field, value, ok := strings.Cut(line, ":")
 			if !ok {
 				continue
 			}
-			k, v = strings.TrimSpace(k), strings.TrimSpace(v)
-			switch k {
+			field, value = strings.TrimSpace(field), strings.TrimSpace(value)
+			switch field {
 			case "type":
-				n.Kind = contracts.NodeKind(v)
+				node.Kind = contracts.NodeKind(value)
 			case "title":
-				n.Title = v
+				node.Title = value
 			default:
-				n.Meta[k] = v
+				node.Meta[field] = value
 			}
 		}
 	}
-	n.Body = body
+	node.Body = body
 	matches := wikilinkRe.FindAllStringSubmatch(body, -1)
-	n.Links = make([]contracts.Link, 0, len(matches))
+	node.Links = make([]contracts.Link, 0, len(matches))
 	for _, m := range matches {
-		n.Links = append(n.Links, contracts.Link{To: m[1], Rel: m[2]})
+		node.Links = append(node.Links, contracts.Link{To: m[1], Rel: m[2]})
 	}
-	return n
+	return node
 }
 
 type splitNote struct {
 	front, body string
 }
 
-func splitFrontmatter(s string) (splitNote, bool) {
-	if !strings.HasPrefix(s, "---\n") {
-		return splitNote{body: s}, false
+func splitFrontmatter(text string) (splitNote, bool) {
+	if !strings.HasPrefix(text, "---\n") {
+		return splitNote{body: text}, false
 	}
-	rest := s[4:]
+	rest := text[4:]
 	for off := 0; off <= len(rest); {
 		line := rest[off:]
-		nl := strings.IndexByte(line, '\n')
+		lineEnd := strings.IndexByte(line, '\n')
 		cur := line
-		if nl >= 0 {
-			cur = line[:nl]
+		if lineEnd >= 0 {
+			cur = line[:lineEnd]
 		}
 		if cur == "---" {
-			if nl < 0 {
+			if lineEnd < 0 {
 				return splitNote{front: rest[:off]}, true
 			}
-			return splitNote{front: rest[:off], body: rest[off+nl+1:]}, true
+			return splitNote{front: rest[:off], body: rest[off+lineEnd+1:]}, true
 		}
-		if nl < 0 {
+		if lineEnd < 0 {
 			break
 		}
-		off += nl + 1
+		off += lineEnd + 1
 	}
-	return splitNote{body: s}, false
+	return splitNote{body: text}, false
 }

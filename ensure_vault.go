@@ -14,14 +14,14 @@ import (
 // superset of New: New stays open-only/strict (no .obsidian/ writes); EnsureVault
 // is what the manifest/host use. Existing .obsidian/ files are never overwritten.
 func EnsureVault(root string) (*ObsidianMemory, error) {
-	m, err := New(root)
+	memory, err := New(root)
 	if err != nil {
 		return nil, err
 	}
-	if err := m.ensureObsidianDir(); err != nil {
-		return nil, errors.Join(err, m.Close())
+	if err := memory.ensureObsidianDir(); err != nil {
+		return nil, errors.Join(err, memory.Close())
 	}
-	return m, nil
+	return memory, nil
 }
 
 func (m *ObsidianMemory) ensureObsidianDir() error {

@@ -36,11 +36,11 @@ func init() {
 			}
 			budget := 2000
 			if v := cfg.Get("node-budget"); v != "" {
-				n, err := strconv.Atoi(v)
+				parsed, err := strconv.Atoi(v)
 				if err != nil {
 					return nil, fmt.Errorf("obsidian: node-budget: %w", err)
 				}
-				budget = n
+				budget = parsed
 			}
 			mem.SetNodeBudget(budget)
 			return mem, nil
