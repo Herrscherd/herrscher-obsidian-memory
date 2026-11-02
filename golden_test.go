@@ -29,8 +29,9 @@ func TestGoldenVaultRecallTraverses(t *testing.T) {
 }
 
 func TestGoldenVaultSearchFindsDecision(t *testing.T) {
-	m, _ := New("examples/vault")
-	res, _ := m.Search(context.Background(), contracts.Query{Kinds: []contracts.NodeKind{contracts.KindDecision}})
+	m := mustNew(t, "examples/vault")
+	res, err := m.Search(context.Background(), contracts.Query{Kinds: []contracts.NodeKind{contracts.KindDecision}})
+	must(t, err)
 	if len(res) == 0 {
 		t.Fatalf("expected at least one decision node in the golden vault")
 	}

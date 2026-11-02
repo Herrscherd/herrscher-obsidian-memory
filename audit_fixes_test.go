@@ -84,7 +84,7 @@ func TestRecallSurfacesNonNotExistNeighborError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer m.Close()
+	closeOnCleanup(t, m)
 	if err := m.Record(ctx, contracts.Node{Key: "a/one", Kind: contracts.KindDecision, Links: []contracts.Link{{To: "a/two", Rel: "sees"}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,11 @@ func TestRecallSurfacesNonNotExistNeighborError(t *testing.T) {
 	if err := os.Chmod(unreadable, 0o000); err != nil {
 		t.Fatal(err)
 	}
-	defer os.Chmod(unreadable, 0o600)
+	t.Cleanup(func() {
+		if err := os.Chmod(unreadable, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
+			t.Error(err)
+		}
+	})
 	if _, err := m.Recall(ctx, "a/one", 1); err == nil {
 		t.Fatal("Recall swallowed an unreadable neighbor")
 	}
@@ -182,7 +186,7 @@ func TestWritesFailWhenLockCannotBeTaken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer peer.Close()
+	closeOnCleanup(t, peer)
 	release, err := peer.flock(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -204,7 +208,7 @@ func TestVaultAndNotesArePrivate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer m.Close()
+	closeOnCleanup(t, m)
 	if err := m.Record(ctx, contracts.Node{Key: "a/one", Kind: contracts.KindDecision}); err != nil {
 		t.Fatal(err)
 	}
@@ -288,12 +292,16 @@ func TestLocateReturnsAbsoluteFileURIFromRelativeRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Chdir(t.TempDir())
-	defer os.Chdir(wd)
+	t.Cleanup(func() {
+		if err := os.Chdir(wd); err != nil {
+			t.Error(err)
+		}
+	})
 	m, err := New("memory")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer m.Close()
+	closeOnCleanup(t, m)
 	if err := m.Record(ctx, contracts.Node{Key: "acme/fact", Kind: contracts.KindDecision}); err != nil {
 		t.Fatal(err)
 	}

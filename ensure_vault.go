@@ -2,6 +2,7 @@ package obsidian
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	contracts "github.com/Herrscherd/herrscher-contracts"
@@ -18,8 +19,7 @@ func EnsureVault(root string) (*ObsidianMemory, error) {
 		return nil, err
 	}
 	if err := m.ensureObsidianDir(); err != nil {
-		m.Close()
-		return nil, err
+		return nil, errors.Join(err, m.Close())
 	}
 	return m, nil
 }

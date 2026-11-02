@@ -112,7 +112,8 @@ func TestInitIsIdempotentAndNeverOverwrites(t *testing.T) {
 	if err := m.Init(ctx, spec); err != nil {
 		t.Fatalf("second Init: %v", err)
 	}
-	got, _ := m.root.ReadFile(rel)
+	got, err := m.root.ReadFile(rel)
+	must(t, err)
 	if !strings.Contains(string(got), "HUMAN EDIT") {
 		t.Fatalf("Init overwrote a human-edited file: %q", string(got))
 	}

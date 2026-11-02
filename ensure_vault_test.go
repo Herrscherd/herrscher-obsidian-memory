@@ -15,7 +15,7 @@ func TestEnsureVaultCreatesObsidianConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsureVault: %v", err)
 	}
-	defer m.Close()
+	closeOnCleanup(t, m)
 
 	for _, name := range []string{".obsidian/app.json", ".obsidian/appearance.json"} {
 		if _, err := os.Stat(filepath.Join(root, name)); err != nil {
@@ -46,7 +46,7 @@ func TestEnsureVaultNeverOverwritesExistingObsidianConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsureVault: %v", err)
 	}
-	defer m.Close()
+	closeOnCleanup(t, m)
 
 	got, err := os.ReadFile(filepath.Join(root, ".obsidian", "app.json"))
 	if err != nil {
@@ -63,7 +63,7 @@ func TestEnsureAgentAndProjectAreIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsureVault: %v", err)
 	}
-	defer m.Close()
+	closeOnCleanup(t, m)
 	ctx := context.Background()
 
 	var p contracts.Provisioner = m

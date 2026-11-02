@@ -68,8 +68,7 @@ func New(root string) (*ObsidianMemory, error) {
 	}
 	lf, err := r.OpenFile(lockName, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		r.Close()
-		return nil, fmt.Errorf("obsidian: open vault lock: %w", err)
+		return nil, errors.Join(fmt.Errorf("obsidian: open vault lock: %w", err), r.Close())
 	}
 	return &ObsidianMemory{root: r, lockFile: lf, now: time.Now, parseCache: map[string]cachedNode{}}, nil
 }
@@ -171,8 +170,7 @@ func (m *ObsidianMemory) writeNode(n contracts.Node, reloadPrior bool) error {
 		return fmt.Errorf("obsidian: write %q: %w", n.Key, err)
 	}
 	if err := m.root.Rename(tmp, rel); err != nil {
-		_ = m.root.Remove(tmp)
-		return fmt.Errorf("obsidian: commit %q: %w", n.Key, err)
+		return fmt.Errorf("obsidian: commit %q: %w", n.Key, errors.Join(err, m.root.Remove(tmp)))
 	}
 	return nil
 }
@@ -325,7 +323,7 @@ func (m *ObsidianMemory) Unlink(ctx context.Context, from, to string) error {
 // Close releases the vault lock and root handle.
 func (m *ObsidianMemory) Close() error {
 	if m.lockFile != nil {
-		_ = m.lockFile.Close()
+		return errors.Join(m.lockFile.Close(), m.root.Close())
 	}
 	return m.root.Close()
 }

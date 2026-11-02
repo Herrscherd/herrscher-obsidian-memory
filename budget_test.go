@@ -21,7 +21,7 @@ func TestRecordRejectsOverBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer m.Close()
+	closeOnCleanup(t, m)
 	m.SetNodeBudget(50)
 
 	err = m.Record(context.Background(), node("projects/x/fact", strings.Repeat("é", 100)))
@@ -39,7 +39,7 @@ func TestRecordAllowsUnderBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer m.Close()
+	closeOnCleanup(t, m)
 	m.SetNodeBudget(50)
 	if err := m.Record(context.Background(), node("projects/x/fact", "short body")); err != nil {
 		t.Fatalf("under budget should record, got %v", err)
@@ -51,7 +51,7 @@ func TestZeroBudgetDisablesCheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer m.Close()
+	closeOnCleanup(t, m)
 	if err := m.Record(context.Background(), node("projects/x/fact", strings.Repeat("x", 10_000))); err != nil {
 		t.Fatalf("zero budget must not enforce, got %v", err)
 	}
@@ -62,7 +62,7 @@ func TestRecordTranscriptBypassesBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer m.Close()
+	closeOnCleanup(t, m)
 	m.SetNodeBudget(10)
 	ctx := context.Background()
 	big := strings.Repeat("x", 500)

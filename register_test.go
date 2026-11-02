@@ -39,7 +39,7 @@ func TestFactoryUsesExplicitVaultAndInitsObsidian(t *testing.T) {
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
-	defer mem.Close()
+	closeOnCleanup(t, mem)
 	if _, err := os.Stat(filepath.Join(root, ".obsidian", "app.json")); err != nil {
 		t.Fatalf("factory did not init .obsidian: %v", err)
 	}

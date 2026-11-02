@@ -91,9 +91,10 @@ func TestRecordThenRecall(t *testing.T) {
 func TestRecordUpsertsNoDuplicate(t *testing.T) {
 	m := newTestMem(t)
 	ctx := context.Background()
-	_ = m.Record(ctx, contracts.Node{Key: "p/index", Kind: contracts.KindProject, Title: "Old"})
-	_ = m.Record(ctx, contracts.Node{Key: "p/index", Kind: contracts.KindProject, Title: "New"})
-	sg, _ := m.Recall(ctx, "p/index", 0)
+	must(t, m.Record(ctx, contracts.Node{Key: "p/index", Kind: contracts.KindProject, Title: "Old"}))
+	must(t, m.Record(ctx, contracts.Node{Key: "p/index", Kind: contracts.KindProject, Title: "New"}))
+	sg, err := m.Recall(ctx, "p/index", 0)
+	must(t, err)
 	if sg.Root.Title != "New" {
 		t.Fatalf("upsert did not update in place: %+v", sg.Root)
 	}
@@ -102,15 +103,15 @@ func TestRecordUpsertsNoDuplicate(t *testing.T) {
 func TestRecallFollowsLinksToDepth(t *testing.T) {
 	m := newTestMem(t)
 	ctx := context.Background()
-	_ = m.Record(ctx, contracts.Node{
+	must(t, m.Record(ctx, contracts.Node{
 		Key: "a", Kind: contracts.KindProject,
 		Links: []contracts.Link{{To: "b", Rel: "depends-on"}},
-	})
-	_ = m.Record(ctx, contracts.Node{
+	}))
+	must(t, m.Record(ctx, contracts.Node{
 		Key: "b", Kind: contracts.KindRepo,
 		Links: []contracts.Link{{To: "c", Rel: "contains"}},
-	})
-	_ = m.Record(ctx, contracts.Node{Key: "c", Kind: contracts.KindRepo})
+	}))
+	must(t, m.Record(ctx, contracts.Node{Key: "c", Kind: contracts.KindRepo}))
 
 	sg, err := m.Recall(ctx, "a", 1)
 	if err != nil {
@@ -138,28 +139,33 @@ func TestRecallMissingKeyErrors(t *testing.T) {
 func TestSearchByKindTagText(t *testing.T) {
 	m := newTestMem(t)
 	ctx := context.Background()
-	_ = m.Record(ctx, contracts.Node{
+	must(t, m.Record(ctx, contracts.Node{
 		Key: "a/index", Kind: contracts.KindProject,
 		Title: "Alpha", Body: "uses NATS", Meta: map[string]string{"tags": "platform, go"},
-	})
-	_ = m.Record(ctx, contracts.Node{
+	}))
+	must(t, m.Record(ctx, contracts.Node{
 		Key: "dec/x", Kind: contracts.KindDecision,
 		Title: "Choose NATS", Body: "transport choice",
-	})
+	}))
 
-	byKind, _ := m.Search(ctx, contracts.Query{Kinds: []contracts.NodeKind{contracts.KindDecision}})
+	byKind, err := m.Search(ctx, contracts.Query{Kinds: []contracts.NodeKind{contracts.KindDecision}})
+
+	must(t, err)
 	if len(byKind) != 1 || byKind[0].Key != "dec/x" {
 		t.Fatalf("kind filter wrong: %+v", byKind)
 	}
-	byText, _ := m.Search(ctx, contracts.Query{Text: "nats"})
+	byText, err := m.Search(ctx, contracts.Query{Text: "nats"})
+	must(t, err)
 	if len(byText) != 2 {
 		t.Fatalf("text filter expected 2, got %d", len(byText))
 	}
-	byTag, _ := m.Search(ctx, contracts.Query{Tags: []string{"go"}})
+	byTag, err := m.Search(ctx, contracts.Query{Tags: []string{"go"}})
+	must(t, err)
 	if len(byTag) != 1 || byTag[0].Key != "a/index" {
 		t.Fatalf("tag filter wrong: %+v", byTag)
 	}
-	lim, _ := m.Search(ctx, contracts.Query{Text: "nats", Limit: 1})
+	lim, err := m.Search(ctx, contracts.Query{Text: "nats", Limit: 1})
+	must(t, err)
 	if len(lim) != 1 {
 		t.Fatalf("limit not honored: %d", len(lim))
 	}
@@ -185,7 +191,9 @@ func TestSearchHidesTranscriptUnlessIncludeRaw(t *testing.T) {
 		}
 	}
 
-	got, _ = m.Search(ctx, contracts.Query{Text: "widget", IncludeArchived: true})
+	got, err = m.Search(ctx, contracts.Query{Text: "widget", IncludeArchived: true})
+
+	must(t, err)
 	for _, n := range got {
 		if n.Kind == contracts.KindTranscript {
 			t.Fatalf("IncludeArchived Search leaked a raw node %q; sweep/merge/promote must not see raw", n.Key)
@@ -210,13 +218,14 @@ func TestSearchHidesTranscriptUnlessIncludeRaw(t *testing.T) {
 func TestLinksCreatesEdgeVisibleToRecall(t *testing.T) {
 	m := newTestMem(t)
 	ctx := context.Background()
-	_ = m.Record(ctx, contracts.Node{Key: "a", Kind: contracts.KindProject})
-	_ = m.Record(ctx, contracts.Node{Key: "b", Kind: contracts.KindRepo})
+	must(t, m.Record(ctx, contracts.Node{Key: "a", Kind: contracts.KindProject}))
+	must(t, m.Record(ctx, contracts.Node{Key: "b", Kind: contracts.KindRepo}))
 
 	if err := m.Links(ctx, "a", "b", "contains"); err != nil {
 		t.Fatalf("Links: %v", err)
 	}
-	sg, _ := m.Recall(ctx, "a", 1)
+	sg, err := m.Recall(ctx, "a", 1)
+	must(t, err)
 	found := false
 	for _, n := range sg.Nodes {
 		if n.Key == "b" {
@@ -231,10 +240,11 @@ func TestLinksCreatesEdgeVisibleToRecall(t *testing.T) {
 func TestLinksIsIdempotent(t *testing.T) {
 	m := newTestMem(t)
 	ctx := context.Background()
-	_ = m.Record(ctx, contracts.Node{Key: "a", Kind: contracts.KindProject})
-	_ = m.Links(ctx, "a", "b", "contains")
-	_ = m.Links(ctx, "a", "b", "contains")
-	n, _ := m.load("a")
+	must(t, m.Record(ctx, contracts.Node{Key: "a", Kind: contracts.KindProject}))
+	must(t, m.Links(ctx, "a", "b", "contains"))
+	must(t, m.Links(ctx, "a", "b", "contains"))
+	n, err := m.load("a")
+	must(t, err)
 	count := 0
 	for _, l := range n.Links {
 		if l.To == "b" {
@@ -249,10 +259,11 @@ func TestLinksIsIdempotent(t *testing.T) {
 func TestLinksKeepsExistingRelOnTarget(t *testing.T) {
 	m := newTestMem(t)
 	ctx := context.Background()
-	_ = m.Record(ctx, contracts.Node{Key: "a", Kind: contracts.KindProject})
-	_ = m.Links(ctx, "a", "b", "depends-on")
-	_ = m.Links(ctx, "a", "b", "contains")
-	n, _ := m.load("a")
+	must(t, m.Record(ctx, contracts.Node{Key: "a", Kind: contracts.KindProject}))
+	must(t, m.Links(ctx, "a", "b", "depends-on"))
+	must(t, m.Links(ctx, "a", "b", "contains"))
+	n, err := m.load("a")
+	must(t, err)
 	if len(n.Links) != 1 || n.Links[0].To != "b" || n.Links[0].Rel != "depends-on" {
 		t.Fatalf("want one b/depends-on edge unchanged: %+v", n.Links)
 	}
@@ -301,8 +312,9 @@ func TestVaultLockFileIsHiddenFromSearch(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, lockName)); err != nil {
 		t.Fatalf("lock file not created: %v", err)
 	}
-	_ = m.Record(context.Background(), contracts.Node{Key: "x", Kind: contracts.KindProject, Body: "lock"})
-	res, _ := m.Search(context.Background(), contracts.Query{Text: "lock"})
+	must(t, m.Record(context.Background(), contracts.Node{Key: "x", Kind: contracts.KindProject, Body: "lock"}))
+	res, err := m.Search(context.Background(), contracts.Query{Text: "lock"})
+	must(t, err)
 	for _, n := range res {
 		if strings.Contains(n.Key, lockName) {
 			t.Fatalf("Search surfaced the lock file: %+v", res)
@@ -313,17 +325,18 @@ func TestVaultLockFileIsHiddenFromSearch(t *testing.T) {
 func TestConcurrentLinksAllLand(t *testing.T) {
 	m := newTestMem(t)
 	ctx := context.Background()
-	_ = m.Record(ctx, contracts.Node{Key: "a", Kind: contracts.KindProject})
+	must(t, m.Record(ctx, contracts.Node{Key: "a", Kind: contracts.KindProject}))
 	var wg sync.WaitGroup
 	for i := 0; i < 16; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_ = m.Links(ctx, "a", fmt.Sprintf("b%d", i), "contains")
+			must(t, m.Links(ctx, "a", fmt.Sprintf("b%d", i), "contains"))
 		}(i)
 	}
 	wg.Wait()
-	n, _ := m.load("a")
+	n, err := m.load("a")
+	must(t, err)
 	if len(n.Links) != 16 {
 		t.Fatalf("want 16 edges after concurrent Links, got %d", len(n.Links))
 	}
@@ -336,7 +349,7 @@ func TestSearchIgnoresSymlinkEscape(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	ctx := context.Background()
-	_ = m.Record(ctx, contracts.Node{Key: "real", Kind: contracts.KindProject, Body: "inside"})
+	must(t, m.Record(ctx, contracts.Node{Key: "real", Kind: contracts.KindProject, Body: "inside"}))
 
 	secret := filepath.Join(t.TempDir(), "secret.md")
 	if err := os.WriteFile(secret, []byte("---\ntype: user\n---\nTOP SECRET\n"), 0o644); err != nil {
@@ -410,7 +423,8 @@ func TestRecord_PreservesCapturedAtOnUpsert(t *testing.T) {
 	if err := m.Record(ctx, contracts.Node{Key: "facts/x", Kind: contracts.KindDecision, Title: "v2"}); err != nil {
 		t.Fatal(err)
 	}
-	sg, _ := m.Recall(ctx, "facts/x", 0)
+	sg, err := m.Recall(ctx, "facts/x", 0)
+	must(t, err)
 	if got := sg.Root.Meta["capturedAt"]; got != t0.Format(time.RFC3339) {
 		t.Fatalf("capturedAt must be preserved from first write %q, got %q", t0.Format(time.RFC3339), got)
 	}
@@ -424,7 +438,8 @@ func TestRecord_KeepsCallerSuppliedCapturedAt(t *testing.T) {
 	if err := m.Record(ctx, contracts.Node{Key: "facts/x", Kind: contracts.KindDecision, Title: "x", Meta: map[string]string{"capturedAt": supplied}}); err != nil {
 		t.Fatal(err)
 	}
-	sg, _ := m.Recall(ctx, "facts/x", 0)
+	sg, err := m.Recall(ctx, "facts/x", 0)
+	must(t, err)
 	if got := sg.Root.Meta["capturedAt"]; got != supplied {
 		t.Fatalf("caller-supplied capturedAt must be kept: want %q, got %q", supplied, got)
 	}
@@ -433,8 +448,8 @@ func TestRecord_KeepsCallerSuppliedCapturedAt(t *testing.T) {
 func TestSearch_RankedOrdersByRelevance(t *testing.T) {
 	m := newTestMem(t)
 	ctx := context.Background()
-	m.Record(ctx, contracts.Node{Key: "facts/title", Kind: contracts.KindDecision, Title: "nats transport choice", Body: "chosen for decoupling"})
-	m.Record(ctx, contracts.Node{Key: "facts/body", Kind: contracts.KindDecision, Title: "logging note", Body: "we mention nats once here"})
+	must(t, m.Record(ctx, contracts.Node{Key: "facts/title", Kind: contracts.KindDecision, Title: "nats transport choice", Body: "chosen for decoupling"}))
+	must(t, m.Record(ctx, contracts.Node{Key: "facts/body", Kind: contracts.KindDecision, Title: "logging note", Body: "we mention nats once here"}))
 	got, err := m.Search(ctx, contracts.Query{Text: "nats", Ranked: true})
 	if err != nil {
 		t.Fatal(err)
@@ -447,8 +462,8 @@ func TestSearch_RankedOrdersByRelevance(t *testing.T) {
 func TestSearch_RankedRespectsLimitAsTopK(t *testing.T) {
 	m := newTestMem(t)
 	ctx := context.Background()
-	m.Record(ctx, contracts.Node{Key: "facts/both", Kind: contracts.KindDecision, Title: "nats transport", Body: "nats transport nats"})
-	m.Record(ctx, contracts.Node{Key: "facts/one", Kind: contracts.KindSession, Title: "note", Body: "nats"})
+	must(t, m.Record(ctx, contracts.Node{Key: "facts/both", Kind: contracts.KindDecision, Title: "nats transport", Body: "nats transport nats"}))
+	must(t, m.Record(ctx, contracts.Node{Key: "facts/one", Kind: contracts.KindSession, Title: "note", Body: "nats"}))
 	got, err := m.Search(ctx, contracts.Query{Text: "nats", Ranked: true, Limit: 1})
 	if err != nil {
 		t.Fatal(err)
@@ -461,8 +476,8 @@ func TestSearch_RankedRespectsLimitAsTopK(t *testing.T) {
 func TestSearch_UnrankedReturnsAllMatches(t *testing.T) {
 	m := newTestMem(t)
 	ctx := context.Background()
-	m.Record(ctx, contracts.Node{Key: "a", Kind: contracts.KindDecision, Title: "nats", Body: "x"})
-	m.Record(ctx, contracts.Node{Key: "b", Kind: contracts.KindDecision, Title: "nats deep", Body: "nats nats"})
+	must(t, m.Record(ctx, contracts.Node{Key: "a", Kind: contracts.KindDecision, Title: "nats", Body: "x"}))
+	must(t, m.Record(ctx, contracts.Node{Key: "b", Kind: contracts.KindDecision, Title: "nats deep", Body: "nats nats"}))
 	got, err := m.Search(ctx, contracts.Query{Text: "nats"})
 	if err != nil {
 		t.Fatal(err)
@@ -498,7 +513,8 @@ func TestWriteNodeStampsAndBumpsLastSeen(t *testing.T) {
 	if err := m.Record(ctx, contracts.Node{Key: "n1", Body: "hello again"}); err != nil {
 		t.Fatal(err)
 	}
-	got, _ = m.Recall(ctx, "n1", 0)
+	got, err = m.Recall(ctx, "n1", 0)
+	must(t, err)
 	if got.Root.Meta[contracts.MetaLastSeen] != t1.Format(time.RFC3339) {
 		t.Fatalf("lastSeen not bumped: %q", got.Root.Meta[contracts.MetaLastSeen])
 	}
@@ -519,7 +535,8 @@ func TestWriteNodeHonorsSuppliedLastSeen(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	got, _ := m.Recall(context.Background(), "n2", 0)
+	got, err := m.Recall(context.Background(), "n2", 0)
+	must(t, err)
 	if got.Root.Meta[contracts.MetaLastSeen] != supplied {
 		t.Fatalf("supplied lastSeen not honored: %q", got.Root.Meta[contracts.MetaLastSeen])
 	}
@@ -552,7 +569,8 @@ func TestArchivedExclusion(t *testing.T) {
 			t.Fatalf("archived node returned by default Search")
 		}
 	}
-	hits, _ = m.Search(ctx, contracts.Query{Text: "keyword", IncludeArchived: true})
+	hits, err = m.Search(ctx, contracts.Query{Text: "keyword", IncludeArchived: true})
+	must(t, err)
 	found := false
 	for _, n := range hits {
 		if n.Key == "old" {

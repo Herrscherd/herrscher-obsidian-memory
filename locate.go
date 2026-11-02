@@ -33,7 +33,9 @@ func (m *ObsidianMemory) Locate(ctx context.Context, key string) (contracts.Loca
 	if err != nil {
 		return contracts.Location{}, fmt.Errorf("obsidian: locate %q: %w", key, err)
 	}
-	_ = f.Close()
+	if err := f.Close(); err != nil {
+		return contracts.Location{}, fmt.Errorf("obsidian: locate %q: %w", key, err)
+	}
 	abs := filepath.Join(m.root.Name(), rel)
 	vault := filepath.Base(m.root.Name())
 	obs := fmt.Sprintf("obsidian://open?vault=%s&file=%s",

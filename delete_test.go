@@ -8,8 +8,8 @@ import (
 )
 
 func TestDeleteRemovesNode(t *testing.T) {
-	m, _ := New(t.TempDir())
-	defer m.Close()
+	m := mustNew(t, t.TempDir())
+	closeOnCleanup(t, m)
 	ctx := context.Background()
 	if err := m.Record(ctx, contracts.Node{Key: "a/b", Kind: contracts.KindDecision}); err != nil {
 		t.Fatal(err)
@@ -23,8 +23,8 @@ func TestDeleteRemovesNode(t *testing.T) {
 }
 
 func TestDeleteIdempotent(t *testing.T) {
-	m, _ := New(t.TempDir())
-	defer m.Close()
+	m := mustNew(t, t.TempDir())
+	closeOnCleanup(t, m)
 	if err := m.Delete(context.Background(), "never/existed"); err != nil {
 		t.Fatalf("Delete of absent key must be nil, got %v", err)
 	}
