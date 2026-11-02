@@ -10,21 +10,19 @@ import (
 	contracts "github.com/Herrscherd/herrscher-contracts"
 )
 
-var _ contracts.Locator = (*ObsidianMemory)(nil)
+var _ contracts.Locator = (*Memory)(nil)
 
 // Locate renvoie les URIs ouvrables de la note du Key. La mémoire résout
 // elle-même son chemin (aucun caller ne devine le stockage). Erreur si le Key
 // est invalide ou si la note n'existe pas.
-func (m *ObsidianMemory) Locate(ctx context.Context, key string) (contracts.Location, error) {
+func (m *Memory) Locate(ctx context.Context, key string) (contracts.Location, error) {
 	if err := ctx.Err(); err != nil {
 		return contracts.Location{}, err
 	}
 	if err := validKey(key); err != nil {
 		return contracts.Location{}, err
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	release, err := m.flock(ctx)
+	release, err := m.begin(ctx)
 	if err != nil {
 		return contracts.Location{}, err
 	}
@@ -32,7 +30,7 @@ func (m *ObsidianMemory) Locate(ctx context.Context, key string) (contracts.Loca
 	return loc, errors.Join(err, release())
 }
 
-func (m *ObsidianMemory) locateUnlocked(key string) (contracts.Location, error) {
+func (m *Memory) locateUnlocked(key string) (contracts.Location, error) {
 	rel := keyToRel(key)
 	file, err := m.root.Open(rel)
 	if err != nil {

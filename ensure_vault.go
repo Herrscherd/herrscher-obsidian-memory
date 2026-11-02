@@ -13,7 +13,7 @@ import (
 // opens the folder as a vault without prompting. It is the create-or-open
 // superset of New: New stays open-only/strict (no .obsidian/ writes); EnsureVault
 // is what the manifest/host use. Existing .obsidian/ files are never overwritten.
-func EnsureVault(root string) (*ObsidianMemory, error) {
+func EnsureVault(root string) (*Memory, error) {
 	memory, err := New(root)
 	if err != nil {
 		return nil, err
@@ -24,7 +24,7 @@ func EnsureVault(root string) (*ObsidianMemory, error) {
 	return memory, nil
 }
 
-func (m *ObsidianMemory) ensureObsidianDir() error {
+func (m *Memory) ensureObsidianDir() error {
 	if err := m.root.MkdirAll(".obsidian", privateDirMode); err != nil {
 		return fmt.Errorf("obsidian: create .obsidian dir: %w", err)
 	}
@@ -43,14 +43,14 @@ func (m *ObsidianMemory) ensureObsidianDir() error {
 // with title as its heading only when absent (idempotent, it never overwrites an
 // existing node). Callers pass contracts.AgentKey(name) so the node lands exactly
 // where the orchestrator's scope will look.
-func (m *ObsidianMemory) EnsureAgent(ctx context.Context, key, title string) error {
+func (m *Memory) EnsureAgent(ctx context.Context, key, title string) error {
 	return m.ensure(ctx, contracts.Node{Key: key, Kind: contracts.KindAgent, Title: title})
 }
 
 // EnsureProject ensures the shared KindProject root node at key exists, creating
 // it only when absent (idempotent). Callers pass contracts.ProjectKey(name).
-func (m *ObsidianMemory) EnsureProject(ctx context.Context, key, title string) error {
+func (m *Memory) EnsureProject(ctx context.Context, key, title string) error {
 	return m.ensure(ctx, contracts.Node{Key: key, Kind: contracts.KindProject, Title: title})
 }
 
-var _ contracts.Provisioner = (*ObsidianMemory)(nil)
+var _ contracts.Provisioner = (*Memory)(nil)

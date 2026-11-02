@@ -308,3 +308,32 @@ func TestLocateReturnsAbsoluteFileURIFromRelativeRoot(t *testing.T) {
 		t.Fatalf("want an absolute file URI, got %q", loc.File)
 	}
 }
+
+func TestWaitingWritersHonourContextWhileLockIsHeld(t *testing.T) {
+	m := newTestMem(t)
+	peer, err := New(m.root.Name())
+	must(t, err)
+	closeOnCleanup(t, peer)
+	release, err := peer.flock(context.Background())
+	must(t, err)
+	t.Cleanup(func() {
+		if err = release(); err != nil {
+			t.Error(err)
+		}
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	inFlight := make(chan error, 1)
+	go func() {
+		inFlight <- m.Record(ctx, contracts.Node{Key: "a/one", Kind: contracts.KindDecision})
+	}()
+	short, stop := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer stop()
+	if err = m.Record(short, contracts.Node{Key: "a/two", Kind: contracts.KindDecision}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("second writer: want context.DeadlineExceeded, got %v", err)
+	}
+	cancel()
+	if err = <-inFlight; !errors.Is(err, context.Canceled) {
+		t.Fatalf("first writer: want context.Canceled, got %v", err)
+	}
+}

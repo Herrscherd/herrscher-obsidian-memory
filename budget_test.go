@@ -1,4 +1,4 @@
-package obsidian_test
+package obsidian
 
 import (
 	"context"
@@ -8,8 +8,6 @@ import (
 	"unicode/utf8"
 
 	contracts "github.com/Herrscherd/herrscher-contracts"
-
-	obsidian "github.com/Herrscherd/herrscher-obsidian-memory"
 )
 
 func node(key, body string) contracts.Node {
@@ -17,7 +15,7 @@ func node(key, body string) contracts.Node {
 }
 
 func TestRecordRejectsOverBudget(t *testing.T) {
-	m, err := obsidian.New(t.TempDir())
+	m, err := New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +33,7 @@ func TestRecordRejectsOverBudget(t *testing.T) {
 }
 
 func TestRecordAllowsUnderBudget(t *testing.T) {
-	m, err := obsidian.New(t.TempDir())
+	m, err := New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +45,7 @@ func TestRecordAllowsUnderBudget(t *testing.T) {
 }
 
 func TestZeroBudgetDisablesCheck(t *testing.T) {
-	m, err := obsidian.New(t.TempDir())
+	m, err := New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +56,7 @@ func TestZeroBudgetDisablesCheck(t *testing.T) {
 }
 
 func TestRecordTranscriptBypassesBudget(t *testing.T) {
-	m, err := obsidian.New(t.TempDir())
+	m, err := New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

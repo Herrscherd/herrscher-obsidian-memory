@@ -32,7 +32,7 @@ func (spec InitSpec) base() string {
 
 // Init scaffolds the canonical layout. It only writes nodes that do not yet exist
 // (idempotent, never overwrites), and links children to their parents.
-func (m *ObsidianMemory) Init(ctx context.Context, spec InitSpec) error {
+func (m *Memory) Init(ctx context.Context, spec InitSpec) error {
 	if spec.Project == "" {
 		return ErrNoProject
 	}
@@ -58,7 +58,7 @@ func (spec InitSpec) domainKey() string {
 	return "domaines/" + slug(spec.Domain) + "/index"
 }
 
-func (m *ObsidianMemory) ensureOrg(ctx context.Context, spec InitSpec, base string) error {
+func (m *Memory) ensureOrg(ctx context.Context, spec InitSpec, base string) error {
 	if spec.Org == "" {
 		return nil
 	}
@@ -103,7 +103,7 @@ func projectLinks(spec InitSpec, base, domainKey string) []contracts.Link {
 	return links
 }
 
-func (m *ObsidianMemory) ensureDomain(ctx context.Context, spec InitSpec, domainKey, projKey string) error {
+func (m *Memory) ensureDomain(ctx context.Context, spec InitSpec, domainKey, projKey string) error {
 	if spec.Domain == "" {
 		return nil
 	}
@@ -146,7 +146,7 @@ func belongsTo(projKey string) []contracts.Link {
 	return []contracts.Link{{To: projKey, Rel: relBelongsTo}}
 }
 
-func (m *ObsidianMemory) ensureAll(ctx context.Context, nodes []contracts.Node) error {
+func (m *Memory) ensureAll(ctx context.Context, nodes []contracts.Node) error {
 	for _, node := range nodes {
 		if err := m.ensure(ctx, node); err != nil {
 			return err
@@ -155,13 +155,11 @@ func (m *ObsidianMemory) ensureAll(ctx context.Context, nodes []contracts.Node) 
 	return nil
 }
 
-func (m *ObsidianMemory) ensure(ctx context.Context, node contracts.Node) error {
+func (m *Memory) ensure(ctx context.Context, node contracts.Node) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	release, err := m.flock(ctx)
+	release, err := m.begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -169,7 +167,7 @@ func (m *ObsidianMemory) ensure(ctx context.Context, node contracts.Node) error 
 	return errors.Join(err, release())
 }
 
-func (m *ObsidianMemory) ensureUnlocked(node contracts.Node) error {
+func (m *Memory) ensureUnlocked(node contracts.Node) error {
 	if _, err := m.root.Stat(keyToRel(node.Key)); err == nil {
 		return nil
 	}

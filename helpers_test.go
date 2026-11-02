@@ -21,7 +21,7 @@ func closeOnCleanup(tb testing.TB, c io.Closer) {
 	})
 }
 
-func mustNew(tb testing.TB, root string) *ObsidianMemory {
+func mustNew(tb testing.TB, root string) *Memory {
 	tb.Helper()
 	m, err := New(root)
 	must(tb, err)

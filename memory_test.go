@@ -2,10 +2,13 @@ package obsidian
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -14,12 +17,11 @@ import (
 	contracts "github.com/Herrscherd/herrscher-contracts"
 )
 
-func newTestMem(t *testing.T) *ObsidianMemory {
+func newTestMem(t *testing.T) *Memory {
 	t.Helper()
 	m, err := New(t.TempDir())
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	must(t, err)
+	closeOnCleanup(t, m)
 	return m
 }
 
@@ -328,14 +330,16 @@ func TestConcurrentLinksAllLand(t *testing.T) {
 	ctx := context.Background()
 	must(t, m.Record(ctx, contracts.Node{Key: "a", Kind: contracts.KindProject}))
 	var wg sync.WaitGroup
-	for i := range 16 {
+	errs := make([]error, 16)
+	for i := range errs {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			must(t, m.Links(ctx, "a", fmt.Sprintf("b%d", i), relContains))
+			errs[i] = m.Links(ctx, "a", fmt.Sprintf("b%d", i), relContains)
 		}(i)
 	}
 	wg.Wait()
+	must(t, errors.Join(errs...))
 	n, err := m.load("a")
 	must(t, err)
 	if len(n.Links) != 16 {
@@ -547,12 +551,12 @@ func TestArchivedExclusion(t *testing.T) {
 	ctx := context.Background()
 	cases := []struct {
 		name string
-		keys func(context.Context, *ObsidianMemory) ([]string, error)
+		keys func(context.Context, *Memory) ([]string, error)
 		want []string
 	}{
 		{
 			name: "default Search hides the archived node",
-			keys: func(ctx context.Context, m *ObsidianMemory) ([]string, error) {
+			keys: func(ctx context.Context, m *Memory) ([]string, error) {
 				hits, err := m.Search(ctx, contracts.Query{Text: "keyword"})
 				return keysOfNodes(hits), err
 			},
@@ -560,7 +564,7 @@ func TestArchivedExclusion(t *testing.T) {
 		},
 		{
 			name: "IncludeArchived Search returns the archived node",
-			keys: func(ctx context.Context, m *ObsidianMemory) ([]string, error) {
+			keys: func(ctx context.Context, m *Memory) ([]string, error) {
 				hits, err := m.Search(ctx, contracts.Query{Text: "keyword", IncludeArchived: true})
 				return keysOfNodes(hits), err
 			},
@@ -568,7 +572,7 @@ func TestArchivedExclusion(t *testing.T) {
 		},
 		{
 			name: "Recall from the root leaves the archived neighbor out",
-			keys: func(ctx context.Context, m *ObsidianMemory) ([]string, error) {
+			keys: func(ctx context.Context, m *Memory) ([]string, error) {
 				sg, err := m.Recall(ctx, "root", 1)
 				return keysOfNodes(sg.Nodes), err
 			},
@@ -576,7 +580,7 @@ func TestArchivedExclusion(t *testing.T) {
 		},
 		{
 			name: "direct Recall returns the archived root",
-			keys: func(ctx context.Context, m *ObsidianMemory) ([]string, error) {
+			keys: func(ctx context.Context, m *Memory) ([]string, error) {
 				sg, err := m.Recall(ctx, "old", 0)
 				return []string{sg.Root.Key}, err
 			},
@@ -598,7 +602,7 @@ func TestArchivedExclusion(t *testing.T) {
 	}
 }
 
-func archivedFixture(ctx context.Context, t *testing.T) *ObsidianMemory {
+func archivedFixture(ctx context.Context, t *testing.T) *Memory {
 	t.Helper()
 	m, err := New(t.TempDir())
 	if err != nil {
@@ -639,5 +643,96 @@ func TestRecallHidesTranscriptNeighbor(t *testing.T) {
 		if n.Kind == contracts.KindTranscript {
 			t.Fatalf("raw transcript neighbor leaked into Recall: %q", n.Key)
 		}
+	}
+}
+
+func TestSearchSeesSameSizeRewriteWithRestoredMtime(t *testing.T) {
+	ctx := context.Background()
+	m := newTestMem(t)
+	must(t, m.Record(ctx, contracts.Node{Key: "a/one", Kind: contracts.KindDecision, Body: "alpha"}))
+	path := filepath.Join(m.root.Name(), "a", "one.md")
+	before, err := os.Stat(path)
+	must(t, err)
+	if _, err = m.Search(ctx, contracts.Query{Text: "alpha"}); err != nil {
+		t.Fatal(err)
+	}
+	must(t, m.Record(ctx, contracts.Node{Key: "a/one", Kind: contracts.KindDecision, Body: "bravo"}))
+	must(t, os.Chtimes(path, before.ModTime(), before.ModTime()))
+	got, err := m.Search(ctx, contracts.Query{Text: "bravo"})
+	must(t, err)
+	if len(got) != 1 || got[0].Body != "bravo" {
+		t.Fatalf("Search served the stale parse: %+v", got)
+	}
+}
+
+func TestRecordLeavesNoTempFile(t *testing.T) {
+	m := newTestMem(t)
+	must(t, m.Record(context.Background(), contracts.Node{Key: "a/one", Kind: contracts.KindDecision, Body: "kept"}))
+	if _, err := os.Stat(filepath.Join(m.root.Name(), "a", "one.md.tmp")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("temp file left behind: %v", err)
+	}
+	n, err := m.load("a/one")
+	must(t, err)
+	if n.Body != "kept" {
+		t.Fatalf("body: got %q", n.Body)
+	}
+}
+
+func TestErrorsQuoteTheKey(t *testing.T) {
+	ctx := context.Background()
+	m := newTestMem(t)
+	must(t, os.WriteFile(filepath.Join(m.root.Name(), "blocker"), nil, privateFileMode))
+	_, err := m.load("a/absent")
+	requireQuotedKey(t, err, "a/absent")
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("missing note: want fs.ErrNotExist, got %v", err)
+	}
+	err = m.Record(ctx, contracts.Node{Key: "a/one", Kind: contracts.KindDecision, Links: []contracts.Link{{To: "a/two", Rel: "x]y"}}})
+	requireQuotedKey(t, err, "a/one")
+	if !errors.Is(err, ErrInvalidLink) {
+		t.Fatalf("bad relation: want ErrInvalidLink, got %v", err)
+	}
+	err = m.Record(ctx, contracts.Node{Key: "blocker/one", Kind: contracts.KindDecision})
+	requireQuotedKey(t, err, "blocker/one")
+}
+
+func requireQuotedKey(t *testing.T, err error, key string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("want an error naming %q", key)
+	}
+	if !strings.Contains(err.Error(), strconv.Quote(key)) {
+		t.Fatalf("error does not quote the key %q: %v", key, err)
+	}
+}
+
+func TestRecordRejectsKindThatBreaksFrontmatter(t *testing.T) {
+	for _, kind := range []contracts.NodeKind{"decision\ntitle: hijacked", "decision\rtype: user"} {
+		t.Run(strconv.Quote(string(kind)), func(t *testing.T) {
+			m := newTestMem(t)
+			err := m.Record(context.Background(), contracts.Node{Key: "a/one", Kind: kind, Title: "Kept"})
+			if !errors.Is(err, ErrInvalidKind) {
+				t.Fatalf("want ErrInvalidKind, got %v", err)
+			}
+			if _, err = m.load("a/one"); !errors.Is(err, fs.ErrNotExist) {
+				t.Fatalf("refused kind still wrote a note: %v", err)
+			}
+		})
+	}
+}
+
+func TestExciseWikilinksKeepsOtherLinks(t *testing.T) {
+	cases := map[string]struct{ body, want string }{
+		"inline":      {"see [[a]] and [[to|rel]] now", "see [[a]] and now"},
+		"bullet only": {"## Liens\n- [[to]]\n- [[b]]", "## Liens\n- [[b]]"},
+		"alias only":  {"[[x]] then [[to|rel]]", "[[x]] then"},
+		"prefix name": {"[[toast]] and [[to]]", "[[toast]] and"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := exciseWikilinks(c.body, "to"); got != c.want {
+				t.Fatalf("got %q, want %q", got, c.want)
+			}
+		})
 	}
 }

@@ -2,16 +2,43 @@ package obsidian
 
 import (
 	"context"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"testing"
 
 	contracts "github.com/Herrscherd/herrscher-contracts"
 )
 
+const goldenVault = "examples/vault"
+
+func copyGoldenVault(t *testing.T) string {
+	t.Helper()
+	dst := t.TempDir()
+	must(t, filepath.WalkDir(goldenVault, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(goldenVault, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if entry.IsDir() {
+			return os.MkdirAll(target, privateDirMode)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, privateFileMode)
+	}))
+	return dst
+}
+
 func TestGoldenVaultRecallTraverses(t *testing.T) {
-	m, err := New("examples/vault")
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	m := mustNew(t, copyGoldenVault(t))
+	closeOnCleanup(t, m)
 	sg, err := m.Recall(context.Background(), "herrscher/herrscher/index", 1)
 	if err != nil {
 		t.Fatalf("Recall: %v", err)
@@ -29,7 +56,8 @@ func TestGoldenVaultRecallTraverses(t *testing.T) {
 }
 
 func TestGoldenVaultSearchFindsDecision(t *testing.T) {
-	m := mustNew(t, "examples/vault")
+	m := mustNew(t, copyGoldenVault(t))
+	closeOnCleanup(t, m)
 	res, err := m.Search(context.Background(), contracts.Query{Kinds: []contracts.NodeKind{contracts.KindDecision}})
 	must(t, err)
 	if len(res) == 0 {

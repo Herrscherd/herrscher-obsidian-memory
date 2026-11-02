@@ -90,30 +90,50 @@ func missingLinkLines(body string, links []contracts.Link) []string {
 	return missing
 }
 
-func exciseWikilinks(body, to string) string {
-	q := regexp.QuoteMeta(to)
-	tok := `\[\[` + q + `(?:\|[^\]]*)?\]\]`
-	targetTok := regexp.MustCompile(tok)
-	bulletOnly := regexp.MustCompile(`^\s*- ` + tok + `\s*$`)
-	spaceThenTok := regexp.MustCompile(`[ \t]` + tok)
-	tokThenSpace := regexp.MustCompile(tok + `[ \t]`)
+const wikilinkPattern = `\[\[([^\]|]+)(?:\|[^\]]*)?\]\]`
 
+var (
+	bulletWikilinkRe = regexp.MustCompile(`^\s*- ` + wikilinkPattern + `\s*$`)
+	spacedWikilinkRe = regexp.MustCompile(`[ \t]` + wikilinkPattern)
+	wikilinkSpacedRe = regexp.MustCompile(wikilinkPattern + `[ \t]`)
+	bareWikilinkRe   = regexp.MustCompile(wikilinkPattern)
+)
+
+func exciseWikilinks(body, target string) string {
 	lines := strings.Split(body, "\n")
 	kept := make([]string, 0, len(lines))
 	for _, line := range lines {
-		if !targetTok.MatchString(line) {
+		if !linksTo(bareWikilinkRe, line, target) {
 			kept = append(kept, line)
 			continue
 		}
-		if bulletOnly.MatchString(line) {
+		if linksTo(bulletWikilinkRe, line, target) {
 			continue
 		}
-		line = spaceThenTok.ReplaceAllString(line, "")
-		line = tokThenSpace.ReplaceAllString(line, "")
-		line = targetTok.ReplaceAllString(line, "")
+		line = removeWikilinksTo(spacedWikilinkRe, line, target)
+		line = removeWikilinksTo(wikilinkSpacedRe, line, target)
+		line = removeWikilinksTo(bareWikilinkRe, line, target)
 		kept = append(kept, line)
 	}
 	return strings.Join(kept, "\n")
+}
+
+func linksTo(pattern *regexp.Regexp, text, target string) bool {
+	for _, m := range pattern.FindAllStringSubmatch(text, -1) {
+		if m[1] == target {
+			return true
+		}
+	}
+	return false
+}
+
+func removeWikilinksTo(pattern *regexp.Regexp, line, target string) string {
+	return pattern.ReplaceAllStringFunc(line, func(match string) string {
+		if linksTo(pattern, match, target) {
+			return ""
+		}
+		return match
+	})
 }
 
 func unmarshalNode(key string, data []byte) contracts.Node {
