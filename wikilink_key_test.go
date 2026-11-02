@@ -7,9 +7,6 @@ import (
 	contracts "github.com/Herrscherd/herrscher-contracts"
 )
 
-// A key is written into other notes as `[[key]]` and read back by a regexp, so a
-// key the syntax cannot carry is not a cosmetic problem: it comes back as a
-// different key, or as a truncated one, on the next read and never at write time.
 func TestKeysAWikilinkCannotCarryAreRefused(t *testing.T) {
 	for _, key := range []string{"a|b", "a]b", "a[b", "a\nb", "a\rb"} {
 		if err := validKey(key); err == nil {
@@ -50,8 +47,6 @@ func TestRecordRefusesAnUnusableRelation(t *testing.T) {
 	}
 }
 
-// The guarantee the refusal buys: everything that is accepted comes back
-// unchanged.
 func TestAcceptedLinksRoundTrip(t *testing.T) {
 	for _, l := range []contracts.Link{
 		{To: "plain"},

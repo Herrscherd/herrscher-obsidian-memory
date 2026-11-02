@@ -600,10 +600,6 @@ func TestArchivedExclusion(t *testing.T) {
 	}
 }
 
-// TestRecallHidesTranscriptNeighbor locks the G7 invisible-by-default invariant
-// at the Recall layer: even if a distilled node ever links to a raw transcript
-// node, graph expansion must not surface the transcript body. Recall has no
-// IncludeRaw concept, so the KindTranscript skip is the structural guard.
 func TestRecallHidesTranscriptNeighbor(t *testing.T) {
 	m, err := New(t.TempDir())
 	if err != nil {
