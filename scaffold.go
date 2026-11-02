@@ -2,7 +2,6 @@ package obsidian
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	contracts "github.com/Herrscherd/herrscher-contracts"
@@ -34,7 +33,7 @@ func (s InitSpec) base() string {
 // (idempotent, never overwrites), and links children to their parents.
 func (m *ObsidianMemory) Init(ctx context.Context, s InitSpec) error {
 	if s.Project == "" {
-		return fmt.Errorf("obsidian: Init needs a Project name")
+		return ErrNoProject
 	}
 	base := s.base()
 

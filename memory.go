@@ -53,7 +53,7 @@ type cachedNode struct {
 // New opens (creating if absent) a vault directory and returns a Memory over it.
 func New(root string) (*ObsidianMemory, error) {
 	if root == "" {
-		return nil, fmt.Errorf("obsidian: empty vault root")
+		return nil, ErrEmptyRoot
 	}
 	root, err := filepath.Abs(root)
 	if err != nil {
@@ -138,7 +138,7 @@ func (m *ObsidianMemory) writeNode(n contracts.Node, reloadPrior bool) error {
 			return fmt.Errorf("obsidian: node %q links to an unusable key: %w", n.Key, err)
 		}
 		if i := strings.IndexAny(l.Rel, wikilinkMeta); i >= 0 {
-			return fmt.Errorf("obsidian: node %q link relation %q contains %q, which a wikilink cannot carry", n.Key, l.Rel, l.Rel[i:i+1])
+			return fmt.Errorf("%w: node %q link relation %q contains %q, which a wikilink cannot carry", ErrInvalidLink, n.Key, l.Rel, l.Rel[i:i+1])
 		}
 	}
 	n.Meta = maps.Clone(n.Meta)

@@ -10,17 +10,17 @@ const wikilinkMeta = "[]|\r\n"
 
 func validKey(key string) error {
 	if key == "" {
-		return fmt.Errorf("obsidian: empty key")
+		return fmt.Errorf("%w: empty key", ErrInvalidKey)
 	}
 	if filepath.IsAbs(key) {
-		return fmt.Errorf("obsidian: absolute key %q", key)
+		return fmt.Errorf("%w: absolute key %q", ErrInvalidKey, key)
 	}
 	if i := strings.IndexAny(key, wikilinkMeta); i >= 0 {
-		return fmt.Errorf("obsidian: key %q contains %q, which a wikilink cannot carry", key, key[i:i+1])
+		return fmt.Errorf("%w: key %q contains %q, which a wikilink cannot carry", ErrInvalidKey, key, key[i:i+1])
 	}
 	for _, p := range strings.Split(key, "/") {
 		if p == "" || p == "." || p == ".." {
-			return fmt.Errorf("obsidian: unsafe key %q", key)
+			return fmt.Errorf("%w: unsafe key %q", ErrInvalidKey, key)
 		}
 	}
 	return nil
