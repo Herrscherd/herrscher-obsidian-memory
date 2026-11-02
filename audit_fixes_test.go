@@ -291,16 +291,7 @@ func TestSearchPrunesCacheEntriesForVanishedFiles(t *testing.T) {
 
 func TestLocateReturnsAbsoluteFileURIFromRelativeRoot(t *testing.T) {
 	ctx := context.Background()
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
 	t.Chdir(t.TempDir())
-	t.Cleanup(func() {
-		if err = os.Chdir(wd); err != nil {
-			t.Error(err)
-		}
-	})
 	m, err := New("memory")
 	if err != nil {
 		t.Fatal(err)
