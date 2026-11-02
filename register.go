@@ -21,7 +21,7 @@ func init() {
 				{Key: "node-budget", Env: "OBSIDIAN_NODE_BUDGET", Help: "per-node Body budget in runes; 0 disables (default 2000)", Required: false},
 			},
 		},
-		Memory: func(ctx context.Context, cfg contracts.PluginConfig) (contracts.Memory, error) {
+		Memory: func(_ context.Context, cfg contracts.PluginConfig) (contracts.Memory, error) {
 			root := cfg.Get("vault")
 			if root == "" {
 				home, err := os.UserHomeDir()

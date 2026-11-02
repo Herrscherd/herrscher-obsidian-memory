@@ -32,17 +32,15 @@ func marshalNode(n contracts.Node) string {
 }
 
 func frontMatter(n contracts.Node) string {
-	var b strings.Builder
-	b.WriteString("---\n")
-	b.WriteString("type: " + string(n.Kind) + "\n")
+	lines := []string{"---", "type: " + string(n.Kind)}
 	if n.Title != "" {
-		b.WriteString("title: " + frontValue(n.Title) + "\n")
+		lines = append(lines, "title: "+frontValue(n.Title))
 	}
 	for _, k := range writableMetaKeys(n.Meta) {
-		b.WriteString(frontKey(k) + ": " + frontValue(n.Meta[k]) + "\n")
+		lines = append(lines, frontKey(k)+": "+frontValue(n.Meta[k]))
 	}
-	b.WriteString("---\n")
-	return b.String()
+	lines = append(lines, "---")
+	return strings.Join(lines, "\n") + "\n"
 }
 
 func writableMetaKeys(meta map[string]string) []string {
@@ -62,20 +60,18 @@ func withMissingLinks(body string, links []contracts.Link) string {
 	if len(missing) == 0 {
 		return body
 	}
-	var b strings.Builder
-	b.WriteString(body)
+	head := body
 	if !strings.HasSuffix(body, "\n") {
-		b.WriteString("\n")
+		head += "\n"
 	}
 	if !liensHeaderRe.MatchString(body) {
-		b.WriteString("\n" + liensHeader + "\n")
+		head += "\n" + liensHeader + "\n"
 	}
-	b.WriteString(strings.Join(missing, "\n") + "\n")
-	return b.String()
+	return head + strings.Join(missing, "\n") + "\n"
 }
 
 func missingLinkLines(body string, links []contracts.Link) []string {
-	present := map[string]bool{}
+	present := make(map[string]bool)
 	for _, m := range wikilinkRe.FindAllStringSubmatch(body, -1) {
 		present[m[1]] = true
 	}
@@ -121,7 +117,7 @@ func exciseWikilinks(body, to string) string {
 }
 
 func unmarshalNode(key string, data []byte) contracts.Node {
-	n := contracts.Node{Key: key, Meta: map[string]string{}}
+	n := contracts.Node{Key: key, Meta: make(map[string]string)}
 	s := string(data)
 
 	split, ok := splitFrontmatter(s)

@@ -19,7 +19,7 @@ func TestGoldenVaultRecallTraverses(t *testing.T) {
 	if sg.Root.Kind != contracts.KindProject {
 		t.Fatalf("root should be a project, got %s", sg.Root.Kind)
 	}
-	reached := map[string]bool{}
+	reached := make(map[string]bool)
 	for _, n := range sg.Nodes {
 		reached[n.Key] = true
 	}

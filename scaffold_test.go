@@ -87,7 +87,7 @@ func TestInitProjectReachesChildrenViaRecall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Recall: %v", err)
 	}
-	reached := map[string]bool{}
+	reached := make(map[string]bool)
 	for _, n := range sg.Nodes {
 		reached[n.Key] = true
 	}
@@ -190,7 +190,7 @@ func TestRecallDomainReachesProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Recall: %v", err)
 	}
-	reached := map[string]bool{}
+	reached := make(map[string]bool)
 	for _, n := range sg.Nodes {
 		reached[n.Key] = true
 	}
@@ -212,7 +212,7 @@ func TestInitDomainAccumulatesMultipleProjects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Recall: %v", err)
 	}
-	reached := map[string]bool{}
+	reached := make(map[string]bool)
 	for _, n := range sg.Nodes {
 		reached[n.Key] = true
 	}
@@ -236,7 +236,7 @@ func TestInitOrgAccumulatesMultipleProjects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Recall: %v", err)
 	}
-	reached := map[string]bool{}
+	reached := make(map[string]bool)
 	for _, n := range sg.Nodes {
 		reached[n.Key] = true
 	}

@@ -118,7 +118,7 @@ func TestRecallFollowsLinksToDepth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Recall: %v", err)
 	}
-	keys := map[string]bool{}
+	keys := make(map[string]bool)
 	for _, n := range sg.Nodes {
 		keys[n.Key] = true
 	}

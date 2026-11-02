@@ -78,7 +78,7 @@ func New(root string) (*ObsidianMemory, error) {
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("obsidian: open vault lock: %w", err), r.Close())
 	}
-	return &ObsidianMemory{root: r, lockFile: lf, now: time.Now, parseCache: map[string]cachedNode{}}, nil
+	return &ObsidianMemory{root: r, lockFile: lf, now: time.Now, parseCache: make(map[string]cachedNode)}, nil
 }
 
 func (m *ObsidianMemory) flock(ctx context.Context) (func() error, error) {
@@ -167,7 +167,7 @@ func validateNodeKeys(n contracts.Node) error {
 func (m *ObsidianMemory) stampedNode(n contracts.Node, reloadPrior bool) contracts.Node {
 	n.Meta = maps.Clone(n.Meta)
 	if n.Meta == nil {
-		n.Meta = map[string]string{}
+		n.Meta = make(map[string]string)
 	}
 	if n.Meta["capturedAt"] == "" {
 		n.Meta["capturedAt"] = m.capturedAtFor(n.Key, reloadPrior)
@@ -277,7 +277,7 @@ func (m *ObsidianMemory) recallUnlocked(ctx context.Context, key string, depth i
 		key:   key,
 		sg:    contracts.Subgraph{Root: root},
 		seen:  map[string]bool{key: true},
-		edges: map[contracts.Link]bool{},
+		edges: make(map[contracts.Link]bool),
 	}
 	frontier := []contracts.Node{root}
 	for d := 0; d < depth && len(frontier) > 0; d++ {
@@ -410,6 +410,7 @@ func (m *ObsidianMemory) Close() error {
 	return m.root.Close()
 }
 
+// Search returns the nodes matching q; archived and raw nodes appear only when q asks for them.
 func (m *ObsidianMemory) Search(ctx context.Context, q contracts.Query) ([]contracts.Node, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
