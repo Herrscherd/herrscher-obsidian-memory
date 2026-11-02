@@ -5,168 +5,195 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Herrscherd/herrscher-contracts"
+	contracts "github.com/Herrscherd/herrscher-contracts"
 )
 
 var wikilinkRe = regexp.MustCompile(`\[\[([^\]|]+)(?:\|([^\]]+))?\]\]`)
 
 const liensHeader = "## Liens"
 
-// liensHeaderRe matches the "## Liens" trailing links section as a full line, so
-// the header is not suppressed by an incidental "## Liens" substring elsewhere in
-// the body (prose, a quote, a code block).
+const (
+	relContains  = "contains"
+	relBelongsTo = "belongs-to"
+)
+
 var liensHeaderRe = regexp.MustCompile(`(?m)^## Liens[ \t]*$`)
 
-// frontValue keeps a frontmatter scalar on a single line so a value can never
-// inject extra keys or a closing "---" fence.
-func frontValue(s string) string {
-	return strings.NewReplacer("\r", " ", "\n", " ").Replace(s)
+func frontValue(text string) string {
+	return strings.NewReplacer("\r", " ", "\n", " ").Replace(text)
 }
 
-func frontKey(s string) string {
-	return strings.TrimSpace(strings.ReplaceAll(frontValue(s), ":", ""))
+func frontKey(text string) string {
+	return strings.TrimSpace(strings.ReplaceAll(frontValue(text), ":", ""))
 }
 
-func marshalNode(n contracts.Node) string {
-	var b strings.Builder
-	b.WriteString("---\n")
-	b.WriteString("type: " + string(n.Kind) + "\n")
-	if n.Title != "" {
-		b.WriteString("title: " + frontValue(n.Title) + "\n")
+func marshalNode(node contracts.Node) string {
+	return frontMatter(node) + withMissingLinks(node.Body, node.Links)
+}
+
+func frontMatter(node contracts.Node) string {
+	lines := []string{"---", "type: " + string(node.Kind)}
+	if node.Title != "" {
+		lines = append(lines, "title: "+frontValue(node.Title))
 	}
-	keys := make([]string, 0, len(n.Meta))
-	for k := range n.Meta {
-		if fk := frontKey(k); fk == "" || fk == "type" || fk == "title" {
-			continue // reserved for Kind/Title — never let Meta shadow them
+	for _, metaKey := range writableMetaKeys(node.Meta) {
+		lines = append(lines, frontKey(metaKey)+": "+frontValue(node.Meta[metaKey]))
+	}
+	lines = append(lines, "---")
+	return strings.Join(lines, "\n") + "\n"
+}
+
+func writableMetaKeys(meta map[string]string) []string {
+	keys := make([]string, 0, len(meta))
+	for metaKey := range meta {
+		if fk := frontKey(metaKey); fk == "" || fk == "type" || fk == "title" {
+			continue
 		}
-		keys = append(keys, k)
+		keys = append(keys, metaKey)
 	}
 	sort.Strings(keys)
-	for _, k := range keys {
-		b.WriteString(frontKey(k) + ": " + frontValue(n.Meta[k]) + "\n")
-	}
-	b.WriteString("---\n")
+	return keys
+}
 
-	body := n.Body
-	present := map[string]bool{}
+func withMissingLinks(body string, links []contracts.Link) string {
+	missing := missingLinkLines(body, links)
+	if len(missing) == 0 {
+		return body
+	}
+	head := body
+	if !strings.HasSuffix(body, "\n") {
+		head += "\n"
+	}
+	if !liensHeaderRe.MatchString(body) {
+		head += "\n" + liensHeader + "\n"
+	}
+	return head + strings.Join(missing, "\n") + "\n"
+}
+
+func missingLinkLines(body string, links []contracts.Link) []string {
+	present := make(map[string]bool)
 	for _, m := range wikilinkRe.FindAllStringSubmatch(body, -1) {
 		present[m[1]] = true
 	}
-	missing := make([]string, 0, len(n.Links))
-	for _, l := range n.Links {
-		if !present[l.To] {
-			tag := l.To
-			if l.Rel != "" {
-				tag += "|" + l.Rel
-			}
-			missing = append(missing, "- [["+tag+"]]")
-			present[l.To] = true
+	missing := make([]string, 0, len(links))
+	for _, link := range links {
+		if present[link.To] {
+			continue
 		}
+		tag := link.To
+		if link.Rel != "" {
+			tag += "|" + link.Rel
+		}
+		missing = append(missing, "- [["+tag+"]]")
+		present[link.To] = true
 	}
-	b.WriteString(body)
-	if len(missing) > 0 {
-		if !strings.HasSuffix(body, "\n") {
-			b.WriteString("\n")
-		}
-		if !liensHeaderRe.MatchString(body) {
-			b.WriteString("\n" + liensHeader + "\n")
-		}
-		b.WriteString(strings.Join(missing, "\n") + "\n")
-	}
-	return b.String()
+	return missing
 }
 
-// exciseWikilinks removes every wikilink whose target key is `to` from body,
-// touching ONLY lines that actually contain such a link so the rest of the
-// human-co-owned note is byte-preserved (no body-wide reflow). A line that is a
-// pure managed bullet ("- [[to|rel]]") is dropped whole; an inline token is
-// removed together with one adjacent space so no gap or leading/trailing space
-// is left behind. Other wikilinks, the "## Liens" header, code blocks, tables,
-// and prose on untouched lines are left exactly as they were.
-func exciseWikilinks(body, to string) string {
-	q := regexp.QuoteMeta(to)
-	tok := `\[\[` + q + `(?:\|[^\]]*)?\]\]` // a wikilink whose target is `to`
-	targetTok := regexp.MustCompile(tok)    // bare token
-	bulletOnly := regexp.MustCompile(`^\s*- ` + tok + `\s*$`)
-	spaceThenTok := regexp.MustCompile(`[ \t]` + tok) // " [[to]]" — drop token + its leading space
-	tokThenSpace := regexp.MustCompile(tok + `[ \t]`) // "[[to]] " — line-leading fallback
+const wikilinkPattern = `\[\[([^\]|]+)(?:\|[^\]]*)?\]\]`
 
+var (
+	bulletWikilinkRe = regexp.MustCompile(`^\s*- ` + wikilinkPattern + `\s*$`)
+	spacedWikilinkRe = regexp.MustCompile(`[ \t]` + wikilinkPattern)
+	wikilinkSpacedRe = regexp.MustCompile(wikilinkPattern + `[ \t]`)
+	bareWikilinkRe   = regexp.MustCompile(wikilinkPattern)
+)
+
+func exciseWikilinks(body, target string) string {
 	lines := strings.Split(body, "\n")
 	kept := make([]string, 0, len(lines))
 	for _, line := range lines {
-		if !targetTok.MatchString(line) {
-			kept = append(kept, line) // no edge to `to` here — preserve verbatim
+		if !linksTo(bareWikilinkRe, line, target) {
+			kept = append(kept, line)
 			continue
 		}
-		if bulletOnly.MatchString(line) {
-			continue // pure "- [[to|rel]]" bullet — remove the whole line
+		if linksTo(bulletWikilinkRe, line, target) {
+			continue
 		}
-		line = spaceThenTok.ReplaceAllString(line, "")
-		line = tokThenSpace.ReplaceAllString(line, "")
-		line = targetTok.ReplaceAllString(line, "")
+		line = removeWikilinksTo(spacedWikilinkRe, line, target)
+		line = removeWikilinksTo(wikilinkSpacedRe, line, target)
+		line = removeWikilinksTo(bareWikilinkRe, line, target)
 		kept = append(kept, line)
 	}
 	return strings.Join(kept, "\n")
 }
 
-func unmarshalNode(key string, data []byte) contracts.Node {
-	n := contracts.Node{Key: key, Meta: map[string]string{}}
-	s := string(data)
+func linksTo(pattern *regexp.Regexp, text, target string) bool {
+	for _, m := range pattern.FindAllStringSubmatch(text, -1) {
+		if m[1] == target {
+			return true
+		}
+	}
+	return false
+}
 
-	front, body, ok := splitFrontmatter(s)
+func removeWikilinksTo(pattern *regexp.Regexp, line, target string) string {
+	return pattern.ReplaceAllStringFunc(line, func(match string) string {
+		if linksTo(pattern, match, target) {
+			return ""
+		}
+		return match
+	})
+}
+
+func unmarshalNode(key string, data []byte) contracts.Node {
+	node := contracts.Node{Key: key, Meta: make(map[string]string)}
+	text := string(data)
+
+	split, ok := splitFrontmatter(text)
+	front, body := split.front, split.body
 	if ok {
 		for _, line := range strings.Split(front, "\n") {
-			k, v, ok := strings.Cut(line, ":")
+			field, value, ok := strings.Cut(line, ":")
 			if !ok {
 				continue
 			}
-			k, v = strings.TrimSpace(k), strings.TrimSpace(v)
-			switch k {
+			field, value = strings.TrimSpace(field), strings.TrimSpace(value)
+			switch field {
 			case "type":
-				n.Kind = contracts.NodeKind(v)
+				node.Kind = contracts.NodeKind(value)
 			case "title":
-				n.Title = v
+				node.Title = value
 			default:
-				n.Meta[k] = v
+				node.Meta[field] = value
 			}
 		}
 	}
-	n.Body = body
+	node.Body = body
 	matches := wikilinkRe.FindAllStringSubmatch(body, -1)
-	n.Links = make([]contracts.Link, 0, len(matches))
+	node.Links = make([]contracts.Link, 0, len(matches))
 	for _, m := range matches {
-		n.Links = append(n.Links, contracts.Link{To: m[1], Rel: m[2]})
+		node.Links = append(node.Links, contracts.Link{To: m[1], Rel: m[2]})
 	}
-	return n
+	return node
 }
 
-// splitFrontmatter separates a leading YAML frontmatter block from the body. The
-// opening and closing fences must each be a standalone "---" line: a file that
-// merely begins with a markdown thematic break, or whose only "---" sits mid-line,
-// is treated as pure body so hand-authored notes are never mis-parsed. When no
-// closing fence is found ok is false and the whole input is returned as body.
-func splitFrontmatter(s string) (front, body string, ok bool) {
-	if !strings.HasPrefix(s, "---\n") {
-		return "", s, false
+type splitNote struct {
+	front, body string
+}
+
+func splitFrontmatter(text string) (splitNote, bool) {
+	if !strings.HasPrefix(text, "---\n") {
+		return splitNote{body: text}, false
 	}
-	rest := s[4:]
+	rest := text[4:]
 	for off := 0; off <= len(rest); {
 		line := rest[off:]
-		nl := strings.IndexByte(line, '\n')
+		lineEnd := strings.IndexByte(line, '\n')
 		cur := line
-		if nl >= 0 {
-			cur = line[:nl]
+		if lineEnd >= 0 {
+			cur = line[:lineEnd]
 		}
 		if cur == "---" {
-			if nl < 0 {
-				return rest[:off], "", true
+			if lineEnd < 0 {
+				return splitNote{front: rest[:off]}, true
 			}
-			return rest[:off], rest[off+nl+1:], true
+			return splitNote{front: rest[:off], body: rest[off+lineEnd+1:]}, true
 		}
-		if nl < 0 {
+		if lineEnd < 0 {
 			break
 		}
-		off += nl + 1
+		off += lineEnd + 1
 	}
-	return "", s, false
+	return splitNote{body: text}, false
 }

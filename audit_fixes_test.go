@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Herrscherd/herrscher-contracts"
+	contracts "github.com/Herrscherd/herrscher-contracts"
 )
 
 func TestSearchResultsDoNotAliasParseCache(t *testing.T) {
@@ -61,11 +61,11 @@ func TestRecordDoesNotMutateCallerMeta(t *testing.T) {
 	if len(shared) != 1 {
 		t.Fatalf("caller meta mutated: %v", shared)
 	}
-	one, err := m.load("a/one")
+	one, err := loadNote(t, m, "a/one")
 	if err != nil {
 		t.Fatal(err)
 	}
-	two, err := m.load("a/two")
+	two, err := loadNote(t, m, "a/two")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,23 +84,27 @@ func TestRecallSurfacesNonNotExistNeighborError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer m.Close()
-	if err := m.Record(ctx, contracts.Node{Key: "a/one", Kind: contracts.KindDecision, Links: []contracts.Link{{To: "a/two", Rel: "sees"}}}); err != nil {
+	closeOnCleanup(t, m)
+	if err = m.Record(ctx, contracts.Node{Key: "a/one", Kind: contracts.KindDecision, Links: []contracts.Link{{To: "a/two", Rel: "sees"}}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.Record(ctx, contracts.Node{Key: "a/two", Kind: contracts.KindDecision}); err != nil {
+	if err = m.Record(ctx, contracts.Node{Key: "a/two", Kind: contracts.KindDecision}); err != nil {
 		t.Fatal(err)
 	}
 	unreadable := filepath.Join(dir, "a", "two.md")
-	if err := os.Chmod(unreadable, 0o000); err != nil {
+	if err = os.Chmod(unreadable, 0o000); err != nil {
 		t.Fatal(err)
 	}
-	defer os.Chmod(unreadable, 0o600)
-	if _, err := m.Recall(ctx, "a/one", 1); err == nil {
+	t.Cleanup(func() {
+		if err = os.Chmod(unreadable, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
+			t.Error(err)
+		}
+	})
+	if _, err = m.Recall(ctx, "a/one", 1); err == nil {
 		t.Fatal("Recall swallowed an unreadable neighbor")
 	}
 
-	if err := os.Remove(unreadable); err != nil {
+	if err = os.Remove(unreadable); err != nil {
 		t.Fatal(err)
 	}
 	sg, err := m.Recall(ctx, "a/one", 1)
@@ -182,12 +186,16 @@ func TestWritesFailWhenLockCannotBeTaken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer peer.Close()
+	closeOnCleanup(t, peer)
 	release, err := peer.flock(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer release()
+	t.Cleanup(func() {
+		if err = release(); err != nil {
+			t.Error(err)
+		}
+	})
 	err = m.Record(ctx, contracts.Node{Key: "a/one", Kind: contracts.KindDecision})
 	if err == nil {
 		t.Fatal("Record proceeded without the cross-process lock")
@@ -204,7 +212,7 @@ func TestVaultAndNotesArePrivate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer m.Close()
+	closeOnCleanup(t, m)
 	if err := m.Record(ctx, contracts.Node{Key: "a/one", Kind: contracts.KindDecision}); err != nil {
 		t.Fatal(err)
 	}
@@ -283,18 +291,13 @@ func TestSearchPrunesCacheEntriesForVanishedFiles(t *testing.T) {
 
 func TestLocateReturnsAbsoluteFileURIFromRelativeRoot(t *testing.T) {
 	ctx := context.Background()
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
 	t.Chdir(t.TempDir())
-	defer os.Chdir(wd)
 	m, err := New("memory")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer m.Close()
-	if err := m.Record(ctx, contracts.Node{Key: "acme/fact", Kind: contracts.KindDecision}); err != nil {
+	closeOnCleanup(t, m)
+	if err = m.Record(ctx, contracts.Node{Key: "acme/fact", Kind: contracts.KindDecision}); err != nil {
 		t.Fatal(err)
 	}
 	loc, err := m.Locate(ctx, "acme/fact")
@@ -303,5 +306,80 @@ func TestLocateReturnsAbsoluteFileURIFromRelativeRoot(t *testing.T) {
 	}
 	if !strings.HasPrefix(loc.File, "file:///") {
 		t.Fatalf("want an absolute file URI, got %q", loc.File)
+	}
+}
+
+func TestWaitingWritersHonourContextWhileLockIsHeld(t *testing.T) {
+	m := newTestMem(t)
+	peer, err := New(m.root.Name())
+	must(t, err)
+	closeOnCleanup(t, peer)
+	release, err := peer.flock(context.Background())
+	must(t, err)
+	t.Cleanup(func() {
+		if err = release(); err != nil {
+			t.Error(err)
+		}
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	inFlight := make(chan error, 1)
+	go func() {
+		inFlight <- m.Record(ctx, contracts.Node{Key: "a/one", Kind: contracts.KindDecision})
+	}()
+	waitForGateHeld(t, m)
+	short, stop := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer stop()
+	waiting := make(chan error, 1)
+	go func() {
+		waiting <- m.Record(short, contracts.Node{Key: "a/two", Kind: contracts.KindDecision})
+	}()
+	select {
+	case err = <-waiting:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("second writer: want context.DeadlineExceeded, got %v", err)
+		}
+	case <-time.After(hangGuard):
+		t.Fatal("second writer ignored its context while waiting for the vault gate")
+	}
+	cancel()
+	select {
+	case err = <-inFlight:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("first writer: want context.Canceled, got %v", err)
+		}
+	case <-time.After(hangGuard):
+		t.Fatal("first writer ignored its cancelled context")
+	}
+}
+
+func TestCancelledWaitReleasesGate(t *testing.T) {
+	m := newTestMem(t)
+	peer, err := New(m.root.Name())
+	must(t, err)
+	closeOnCleanup(t, peer)
+	release, err := peer.flock(context.Background())
+	must(t, err)
+	short, stop := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer stop()
+	if err = m.Record(short, contracts.Node{Key: "a/one", Kind: contracts.KindDecision}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("blocked writer: want context.DeadlineExceeded, got %v", err)
+	}
+	must(t, release())
+	later, stopLater := context.WithTimeout(context.Background(), hangGuard)
+	defer stopLater()
+	must(t, m.Record(later, contracts.Node{Key: "a/two", Kind: contracts.KindDecision}))
+}
+
+const hangGuard = 5 * time.Second
+
+func waitForGateHeld(t *testing.T, m *Memory) {
+	t.Helper()
+	deadline := time.Now().Add(hangGuard)
+	for len(m.gate) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("first writer never acquired the vault gate")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }

@@ -2,17 +2,12 @@ package obsidian
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"strings"
 
-	"github.com/Herrscherd/herrscher-contracts"
+	contracts "github.com/Herrscherd/herrscher-contracts"
 )
 
-// slug canonicalizes a caller-supplied name into a vault key path segment. Names
-// enter the keyspace verbatim, so "Neublox" and "neublox" would otherwise scaffold
-// two separate scopes; folding case (and trimming surrounding space) collapses them
-// onto one canonical path. The raw name is kept for node Titles, so the human UI
-// still shows the original casing.
 func slug(name string) string {
 	return strings.ToLower(strings.TrimSpace(name))
 }
@@ -28,120 +23,153 @@ type InitSpec struct {
 	Servers []string
 }
 
-// base returns the vault path prefix for the project ("<org>/<project>" or
-// "projets/<project>").
-func (s InitSpec) base() string {
-	if s.Org != "" {
-		return slug(s.Org) + "/" + slug(s.Project)
+func (spec InitSpec) base() string {
+	if spec.Org != "" {
+		return slug(spec.Org) + "/" + slug(spec.Project)
 	}
-	return "projets/" + slug(s.Project)
+	return "projets/" + slug(spec.Project)
 }
 
 // Init scaffolds the canonical layout. It only writes nodes that do not yet exist
 // (idempotent, never overwrites), and links children to their parents.
-func (m *ObsidianMemory) Init(ctx context.Context, s InitSpec) error {
-	if s.Project == "" {
-		return fmt.Errorf("obsidian: Init needs a Project name")
+func (m *Memory) Init(ctx context.Context, spec InitSpec) error {
+	if spec.Project == "" {
+		return ErrNoProject
 	}
-	base := s.base()
-
-	// Domain (optional, transverse): attach the project to a "domaines/<slug>" root.
-	var domainKey string
-	if s.Domain != "" {
-		domainKey = "domaines/" + slug(s.Domain) + "/index"
-	}
-
-	if s.Org != "" {
-		orgKey := slug(s.Org) + "/index"
-		if err := m.ensure(ctx, contracts.Node{Key: orgKey, Kind: contracts.KindOrganization,
-			Title: s.Org}); err != nil {
-			return err
-		}
-		// Append via Links (idempotent) rather than the node literal so a second
-		// project under the same org is added instead of dropped (ensure skips an
-		// existing org node, so its literal links never grow).
-		if err := m.Links(ctx, orgKey, base+"/index", "contains"); err != nil {
-			return err
-		}
-	}
-
+	base := spec.base()
+	domainKey := spec.domainKey()
 	projKey := base + "/index"
-	projLinks := make([]contracts.Link, 0, 4+len(s.Repos)+len(s.Servers))
-	if s.Org != "" {
-		projLinks = append(projLinks, contracts.Link{To: slug(s.Org) + "/index", Rel: "belongs-to"})
-	}
-	// The project node links down to every child so Recall(project) surfaces the
-	// whole spine; children also link back up (belongs-to) below.
-	projLinks = append(projLinks,
-		contracts.Link{To: base + "/architecture", Rel: "contains"},
-		contracts.Link{To: base + "/production", Rel: "contains"})
-	for _, r := range s.Repos {
-		projLinks = append(projLinks, contracts.Link{To: base + "/repos/" + slug(r), Rel: "contains"})
-	}
-	for _, sv := range s.Servers {
-		projLinks = append(projLinks, contracts.Link{To: base + "/servers/" + slug(sv), Rel: "contains"})
-	}
-	if domainKey != "" {
-		projLinks = append(projLinks, contracts.Link{To: domainKey, Rel: "in-domain"})
-	}
-	projNode := contracts.Node{Key: projKey, Kind: contracts.KindProject,
-		Title: s.Project, Links: projLinks}
-	if s.Domain != "" {
-		projNode.Meta = map[string]string{"domain": s.Domain}
-	}
-	if err := m.ensure(ctx, projNode); err != nil {
+	if err := m.ensureOrg(ctx, spec, base); err != nil {
 		return err
 	}
-	if domainKey != "" {
-		if err := m.ensure(ctx, contracts.Node{Key: domainKey, Kind: contracts.KindDomain,
-			Title: s.Domain}); err != nil {
-			return err
-		}
-		// Same reason as the org contains-link above: append via Links so a domain
-		// accumulates every project attached to it, not just the first.
-		if err := m.Links(ctx, domainKey, projKey, "contains"); err != nil {
-			return err
-		}
-	}
-	if err := m.ensure(ctx, contracts.Node{Key: base + "/architecture", Kind: contracts.KindArchitecture,
-		Title: s.Project + " — architecture", Links: []contracts.Link{{To: projKey, Rel: "belongs-to"}}}); err != nil {
+	if err := m.ensure(ctx, projectNode(spec, base, domainKey)); err != nil {
 		return err
 	}
-	if err := m.ensure(ctx, contracts.Node{Key: base + "/production", Kind: contracts.KindProduction,
-		Title: s.Project + " — production", Links: []contracts.Link{{To: projKey, Rel: "belongs-to"}}}); err != nil {
+	if err := m.ensureDomain(ctx, spec, domainKey, projKey); err != nil {
 		return err
 	}
+	return m.ensureAll(ctx, childNodes(spec, base, projKey))
+}
 
-	for _, r := range s.Repos {
-		if err := m.ensure(ctx, contracts.Node{Key: base + "/repos/" + slug(r), Kind: contracts.KindRepo,
-			Title: r, Links: []contracts.Link{{To: projKey, Rel: "belongs-to"}}}); err != nil {
-			return err
-		}
+func (spec InitSpec) domainKey() string {
+	if spec.Domain == "" {
+		return ""
 	}
-	for _, sv := range s.Servers {
-		if err := m.ensure(ctx, contracts.Node{Key: base + "/servers/" + slug(sv), Kind: contracts.KindServer,
-			Title: sv, Links: []contracts.Link{{To: projKey, Rel: "belongs-to"}}}); err != nil {
+	return "domaines/" + slug(spec.Domain) + "/index"
+}
+
+func (m *Memory) ensureOrg(ctx context.Context, spec InitSpec, base string) error {
+	if spec.Org == "" {
+		return nil
+	}
+	orgKey := slug(spec.Org) + "/index"
+	if err := m.ensure(ctx, contracts.Node{
+		Key: orgKey, Kind: contracts.KindOrganization,
+		Title: spec.Org,
+	}); err != nil {
+		return err
+	}
+	return m.Links(ctx, orgKey, base+"/index", relContains)
+}
+
+func projectNode(spec InitSpec, base, domainKey string) contracts.Node {
+	node := contracts.Node{
+		Key: base + "/index", Kind: contracts.KindProject,
+		Title: spec.Project, Links: projectLinks(spec, base, domainKey),
+	}
+	if spec.Domain != "" {
+		node.Meta = map[string]string{"domain": spec.Domain}
+	}
+	return node
+}
+
+func projectLinks(spec InitSpec, base, domainKey string) []contracts.Link {
+	links := make([]contracts.Link, 0, 4+len(spec.Repos)+len(spec.Servers))
+	if spec.Org != "" {
+		links = append(links, contracts.Link{To: slug(spec.Org) + "/index", Rel: relBelongsTo})
+	}
+	links = append(links,
+		contracts.Link{To: base + "/architecture", Rel: relContains},
+		contracts.Link{To: base + "/production", Rel: relContains})
+	for _, repo := range spec.Repos {
+		links = append(links, contracts.Link{To: base + "/repos/" + slug(repo), Rel: relContains})
+	}
+	for _, server := range spec.Servers {
+		links = append(links, contracts.Link{To: base + "/servers/" + slug(server), Rel: relContains})
+	}
+	if domainKey != "" {
+		links = append(links, contracts.Link{To: domainKey, Rel: "in-domain"})
+	}
+	return links
+}
+
+func (m *Memory) ensureDomain(ctx context.Context, spec InitSpec, domainKey, projKey string) error {
+	if spec.Domain == "" {
+		return nil
+	}
+	if err := m.ensure(ctx, contracts.Node{
+		Key: domainKey, Kind: contracts.KindDomain,
+		Title: spec.Domain,
+	}); err != nil {
+		return err
+	}
+	return m.Links(ctx, domainKey, projKey, relContains)
+}
+
+func childNodes(spec InitSpec, base, projKey string) []contracts.Node {
+	nodes := []contracts.Node{
+		{
+			Key: base + "/architecture", Kind: contracts.KindArchitecture,
+			Title: spec.Project + ": architecture", Links: belongsTo(projKey),
+		},
+		{
+			Key: base + "/production", Kind: contracts.KindProduction,
+			Title: spec.Project + ": production", Links: belongsTo(projKey),
+		},
+	}
+	for _, repo := range spec.Repos {
+		nodes = append(nodes, contracts.Node{
+			Key: base + "/repos/" + slug(repo), Kind: contracts.KindRepo,
+			Title: repo, Links: belongsTo(projKey),
+		})
+	}
+	for _, server := range spec.Servers {
+		nodes = append(nodes, contracts.Node{
+			Key: base + "/servers/" + slug(server), Kind: contracts.KindServer,
+			Title: server, Links: belongsTo(projKey),
+		})
+	}
+	return nodes
+}
+
+func belongsTo(projKey string) []contracts.Link {
+	return []contracts.Link{{To: projKey, Rel: relBelongsTo}}
+}
+
+func (m *Memory) ensureAll(ctx context.Context, nodes []contracts.Node) error {
+	for _, node := range nodes {
+		if err := m.ensure(ctx, node); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// ensure Records the node only if its file does not already exist. The existence
-// check and the write are atomic under the same lock Record uses.
-func (m *ObsidianMemory) ensure(ctx context.Context, n contracts.Node) error {
+func (m *Memory) ensure(ctx context.Context, node contracts.Node) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	release, err := m.flock(ctx)
+	release, err := m.begin(ctx)
 	if err != nil {
 		return err
 	}
-	defer release()
-	if _, err := m.root.Stat(keyToRel(n.Key)); err == nil {
-		return nil // exists — never overwrite
+	err = m.ensureUnlocked(node)
+	return errors.Join(err, release())
+}
+
+func (m *Memory) ensureUnlocked(node contracts.Node) error {
+	if _, err := m.root.Stat(keyToRel(node.Key)); err == nil {
+		return nil
 	}
-	return m.recordUnlockedNoReload(n)
+	return m.recordUnlockedNoReload(node)
 }

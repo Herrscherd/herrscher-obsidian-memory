@@ -14,8 +14,8 @@ func TestLocateExistingNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer m.Close()
-	if err := m.Record(context.Background(), contracts.Node{Key: "acme/proj/fact", Kind: contracts.KindDecision, Title: "F"}); err != nil {
+	closeOnCleanup(t, m)
+	if err = m.Record(context.Background(), contracts.Node{Key: "acme/proj/fact", Kind: contracts.KindDecision, Title: "F"}); err != nil {
 		t.Fatal(err)
 	}
 	loc, err := m.Locate(context.Background(), "acme/proj/fact")
@@ -31,16 +31,16 @@ func TestLocateExistingNode(t *testing.T) {
 }
 
 func TestLocateMissingNode(t *testing.T) {
-	m, _ := New(t.TempDir())
-	defer m.Close()
+	m := mustNew(t, t.TempDir())
+	closeOnCleanup(t, m)
 	if _, err := m.Locate(context.Background(), "nope"); err == nil {
 		t.Fatal("expected error for missing node")
 	}
 }
 
 func TestLocateUnsafeKey(t *testing.T) {
-	m, _ := New(t.TempDir())
-	defer m.Close()
+	m := mustNew(t, t.TempDir())
+	closeOnCleanup(t, m)
 	if _, err := m.Locate(context.Background(), "../escape"); err == nil {
 		t.Fatal("expected error for unsafe key")
 	}
@@ -52,8 +52,8 @@ func TestLocateEncodesSpacesInPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer m.Close()
-	if err := m.Record(context.Background(), contracts.Node{Key: "a/b", Kind: contracts.KindDecision}); err != nil {
+	closeOnCleanup(t, m)
+	if err = m.Record(context.Background(), contracts.Node{Key: "a/b", Kind: contracts.KindDecision}); err != nil {
 		t.Fatal(err)
 	}
 	loc, err := m.Locate(context.Background(), "a/b")

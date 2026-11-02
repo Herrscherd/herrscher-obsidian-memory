@@ -1,6 +1,6 @@
 ---
 type: architecture
-title: Herrscher — architecture
+title: Herrscher: architecture
 ---
 Plugins self-register in init() (xcaddy pattern); the host resolves a PluginConfig
 from each plugin's declared Settings. Categories: gateway, backend, memory,

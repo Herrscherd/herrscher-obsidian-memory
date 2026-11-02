@@ -6,10 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Herrscherd/herrscher-contracts"
+	contracts "github.com/Herrscherd/herrscher-contracts"
 )
 
-// findPlugin returns the registered obsidian memory plugin.
 func findPlugin(t *testing.T) contracts.Plugin {
 	t.Helper()
 	for _, p := range contracts.Default.Memories() {
@@ -40,7 +39,7 @@ func TestFactoryUsesExplicitVaultAndInitsObsidian(t *testing.T) {
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
-	defer mem.Close()
+	closeOnCleanup(t, mem)
 	if _, err := os.Stat(filepath.Join(root, ".obsidian", "app.json")); err != nil {
 		t.Fatalf("factory did not init .obsidian: %v", err)
 	}

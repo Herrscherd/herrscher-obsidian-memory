@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Herrscherd/herrscher-contracts"
+	contracts "github.com/Herrscherd/herrscher-contracts"
 )
 
 func TestInitCanonicalizesProjectCaseToOneScope(t *testing.T) {
@@ -17,14 +17,14 @@ func TestInitCanonicalizesProjectCaseToOneScope(t *testing.T) {
 	if err := m.Init(ctx, InitSpec{Project: "neublox"}); err != nil {
 		t.Fatalf("second Init: %v", err)
 	}
-	proj, err := m.load("projets/neublox/index")
+	proj, err := loadNote(t, m, "projets/neublox/index")
 	if err != nil {
 		t.Fatalf("canonical project node missing: %v", err)
 	}
 	if proj.Title != "Neublox" {
 		t.Fatalf("project Title = %q, want raw first-seen casing Neublox", proj.Title)
 	}
-	if _, err := m.load("projets/Neublox/index"); err == nil {
+	if _, err := loadNote(t, m, "projets/Neublox/index"); err == nil {
 		t.Fatalf("mixed-case duplicate scope projets/Neublox/index was created")
 	}
 }
@@ -36,7 +36,7 @@ func TestInitCanonicalizesOrgAndDomainCase(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 	for _, key := range []string{"acme/index", "acme/proj/index", "domaines/dev/index"} {
-		if _, err := m.load(key); err != nil {
+		if _, err := loadNote(t, m, key); err != nil {
 			t.Fatalf("expected canonical key %q: %v", key, err)
 		}
 	}
@@ -55,23 +55,23 @@ func TestInitScaffoldsHierarchy(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 
-	proj, err := m.load("herrscher/herrscher/index")
+	proj, err := loadNote(t, m, "herrscher/herrscher/index")
 	if err != nil {
 		t.Fatalf("project node missing: %v", err)
 	}
 	if proj.Kind != contracts.KindProject {
 		t.Fatalf("project kind wrong: %s", proj.Kind)
 	}
-	if _, err := m.load("herrscher/herrscher/repos/contracts"); err != nil {
+	if _, err := loadNote(t, m, "herrscher/herrscher/repos/contracts"); err != nil {
 		t.Fatalf("repo node missing: %v", err)
 	}
-	if _, err := m.load("herrscher/herrscher/servers/vps-1"); err != nil {
+	if _, err := loadNote(t, m, "herrscher/herrscher/servers/vps-1"); err != nil {
 		t.Fatalf("server node missing: %v", err)
 	}
-	if _, err := m.load("herrscher/index"); err != nil {
+	if _, err := loadNote(t, m, "herrscher/index"); err != nil {
 		t.Fatalf("org node missing: %v", err)
 	}
-	if _, err := m.load("herrscher/herrscher/architecture"); err != nil {
+	if _, err := loadNote(t, m, "herrscher/herrscher/architecture"); err != nil {
 		t.Fatalf("architecture doc missing: %v", err)
 	}
 }
@@ -87,7 +87,7 @@ func TestInitProjectReachesChildrenViaRecall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Recall: %v", err)
 	}
-	reached := map[string]bool{}
+	reached := make(map[string]bool)
 	for _, n := range sg.Nodes {
 		reached[n.Key] = true
 	}
@@ -112,7 +112,8 @@ func TestInitIsIdempotentAndNeverOverwrites(t *testing.T) {
 	if err := m.Init(ctx, spec); err != nil {
 		t.Fatalf("second Init: %v", err)
 	}
-	got, _ := m.root.ReadFile(rel)
+	got, err := m.root.ReadFile(rel)
+	must(t, err)
 	if !strings.Contains(string(got), "HUMAN EDIT") {
 		t.Fatalf("Init overwrote a human-edited file: %q", string(got))
 	}
@@ -126,7 +127,7 @@ func TestInitWithDomainScaffoldsDomainNodeAndLinks(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 
-	dom, err := m.load("domaines/dev/index")
+	dom, err := loadNote(t, m, "domaines/dev/index")
 	if err != nil {
 		t.Fatalf("domain node missing: %v", err)
 	}
@@ -135,7 +136,7 @@ func TestInitWithDomainScaffoldsDomainNodeAndLinks(t *testing.T) {
 	}
 	foundContains := false
 	for _, l := range dom.Links {
-		if l.To == "projets/proj/index" && l.Rel == "contains" {
+		if l.To == "projets/proj/index" && l.Rel == relContains {
 			foundContains = true
 		}
 	}
@@ -143,7 +144,7 @@ func TestInitWithDomainScaffoldsDomainNodeAndLinks(t *testing.T) {
 		t.Fatalf("domain does not contain project: %+v", dom.Links)
 	}
 
-	proj, err := m.load("projets/proj/index")
+	proj, err := loadNote(t, m, "projets/proj/index")
 	if err != nil {
 		t.Fatalf("project node missing: %v", err)
 	}
@@ -167,10 +168,10 @@ func TestInitWithoutDomainIsUnchanged(t *testing.T) {
 	if err := m.Init(ctx, InitSpec{Project: "solo"}); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
-	if _, err := m.load("domaines/solo/index"); err == nil {
+	if _, err := loadNote(t, m, "domaines/solo/index"); err == nil {
 		t.Fatalf("no-domain Init created a domain node")
 	}
-	proj, err := m.load("projets/solo/index")
+	proj, err := loadNote(t, m, "projets/solo/index")
 	if err != nil {
 		t.Fatalf("project missing: %v", err)
 	}
@@ -189,7 +190,7 @@ func TestRecallDomainReachesProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Recall: %v", err)
 	}
-	reached := map[string]bool{}
+	reached := make(map[string]bool)
 	for _, n := range sg.Nodes {
 		reached[n.Key] = true
 	}
@@ -211,7 +212,7 @@ func TestInitDomainAccumulatesMultipleProjects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Recall: %v", err)
 	}
-	reached := map[string]bool{}
+	reached := make(map[string]bool)
 	for _, n := range sg.Nodes {
 		reached[n.Key] = true
 	}
@@ -235,7 +236,7 @@ func TestInitOrgAccumulatesMultipleProjects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Recall: %v", err)
 	}
-	reached := map[string]bool{}
+	reached := make(map[string]bool)
 	for _, n := range sg.Nodes {
 		reached[n.Key] = true
 	}

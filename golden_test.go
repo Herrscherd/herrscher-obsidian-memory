@@ -2,16 +2,43 @@ package obsidian
 
 import (
 	"context"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"testing"
 
-	"github.com/Herrscherd/herrscher-contracts"
+	contracts "github.com/Herrscherd/herrscher-contracts"
 )
 
+const goldenVault = "examples/vault"
+
+func copyGoldenVault(t *testing.T) string {
+	t.Helper()
+	dst := t.TempDir()
+	must(t, filepath.WalkDir(goldenVault, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(goldenVault, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if entry.IsDir() {
+			return os.MkdirAll(target, privateDirMode)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, privateFileMode)
+	}))
+	return dst
+}
+
 func TestGoldenVaultRecallTraverses(t *testing.T) {
-	m, err := New("examples/vault")
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	m := mustNew(t, copyGoldenVault(t))
+	closeOnCleanup(t, m)
 	sg, err := m.Recall(context.Background(), "herrscher/herrscher/index", 1)
 	if err != nil {
 		t.Fatalf("Recall: %v", err)
@@ -19,7 +46,7 @@ func TestGoldenVaultRecallTraverses(t *testing.T) {
 	if sg.Root.Kind != contracts.KindProject {
 		t.Fatalf("root should be a project, got %s", sg.Root.Kind)
 	}
-	reached := map[string]bool{}
+	reached := make(map[string]bool)
 	for _, n := range sg.Nodes {
 		reached[n.Key] = true
 	}
@@ -29,8 +56,10 @@ func TestGoldenVaultRecallTraverses(t *testing.T) {
 }
 
 func TestGoldenVaultSearchFindsDecision(t *testing.T) {
-	m, _ := New("examples/vault")
-	res, _ := m.Search(context.Background(), contracts.Query{Kinds: []contracts.NodeKind{contracts.KindDecision}})
+	m := mustNew(t, copyGoldenVault(t))
+	closeOnCleanup(t, m)
+	res, err := m.Search(context.Background(), contracts.Query{Kinds: []contracts.NodeKind{contracts.KindDecision}})
+	must(t, err)
 	if len(res) == 0 {
 		t.Fatalf("expected at least one decision node in the golden vault")
 	}

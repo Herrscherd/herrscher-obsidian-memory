@@ -9,33 +9,34 @@ import (
 	contracts "github.com/Herrscherd/herrscher-contracts"
 )
 
-var _ contracts.Deleter = (*ObsidianMemory)(nil)
+var _ contracts.Deleter = (*Memory)(nil)
 
 // Delete retire la note du Key. Idempotent : un Key absent renvoie nil. Prend le
 // même verrouillage in-process + cross-process que les écritures et invalide le
 // parseCache pour le fichier retiré.
-func (m *ObsidianMemory) Delete(ctx context.Context, key string) error {
+func (m *Memory) Delete(ctx context.Context, key string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if err := validKey(key); err != nil {
 		return err
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	release, err := m.flock(ctx)
+	release, err := m.begin(ctx)
 	if err != nil {
 		return err
 	}
-	defer release()
+	err = m.deleteUnlocked(key)
+	return errors.Join(err, release())
+}
 
+func (m *Memory) deleteUnlocked(key string) error {
 	rel := keyToRel(key)
 	if err := m.root.Remove(rel); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil // idempotent
+			return nil
 		}
 		return fmt.Errorf("obsidian: delete %q: %w", key, err)
 	}
-	delete(m.parseCache, rel)
+	m.forget(rel)
 	return nil
 }

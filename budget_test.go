@@ -1,4 +1,4 @@
-package obsidian_test
+package obsidian
 
 import (
 	"context"
@@ -8,7 +8,6 @@ import (
 	"unicode/utf8"
 
 	contracts "github.com/Herrscherd/herrscher-contracts"
-	obsidian "github.com/Herrscherd/herrscher-obsidian-memory"
 )
 
 func node(key, body string) contracts.Node {
@@ -16,14 +15,13 @@ func node(key, body string) contracts.Node {
 }
 
 func TestRecordRejectsOverBudget(t *testing.T) {
-	m, err := obsidian.New(t.TempDir())
+	m, err := New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer m.Close()
+	closeOnCleanup(t, m)
 	m.SetNodeBudget(50)
 
-	// 100 accented runes = 200 bytes: proves the check counts runes, not bytes.
 	err = m.Record(context.Background(), node("projects/x/fact", strings.Repeat("é", 100)))
 	var be *contracts.BudgetError
 	if !errors.As(err, &be) {
@@ -35,11 +33,11 @@ func TestRecordRejectsOverBudget(t *testing.T) {
 }
 
 func TestRecordAllowsUnderBudget(t *testing.T) {
-	m, err := obsidian.New(t.TempDir())
+	m, err := New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer m.Close()
+	closeOnCleanup(t, m)
 	m.SetNodeBudget(50)
 	if err := m.Record(context.Background(), node("projects/x/fact", "short body")); err != nil {
 		t.Fatalf("under budget should record, got %v", err)
@@ -47,35 +45,33 @@ func TestRecordAllowsUnderBudget(t *testing.T) {
 }
 
 func TestZeroBudgetDisablesCheck(t *testing.T) {
-	m, err := obsidian.New(t.TempDir())
+	m, err := New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer m.Close()
-	// default budget is 0 (New does not set one) → no enforcement.
+	closeOnCleanup(t, m)
 	if err := m.Record(context.Background(), node("projects/x/fact", strings.Repeat("x", 10_000))); err != nil {
 		t.Fatalf("zero budget must not enforce, got %v", err)
 	}
 }
 
 func TestRecordTranscriptBypassesBudget(t *testing.T) {
-	m, err := obsidian.New(t.TempDir())
+	m, err := New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer m.Close()
-	m.SetNodeBudget(10) // 10-rune cap
+	closeOnCleanup(t, m)
+	m.SetNodeBudget(10)
 	ctx := context.Background()
 	big := strings.Repeat("x", 500)
 
-	// A distilled node over budget is rejected (existing behaviour, regression-lock).
 	err = m.Record(ctx, contracts.Node{Key: "projects/p/fact", Kind: contracts.KindProject, Body: big})
-	if _, ok := err.(*contracts.BudgetError); !ok {
+	var budgetErr *contracts.BudgetError
+	if !errors.As(err, &budgetErr) {
 		t.Fatalf("distilled over-budget Record: got %v, want *BudgetError", err)
 	}
 
-	// A raw transcript node over budget is stored untruncated.
-	if err := m.Record(ctx, contracts.Node{Key: "raw/s/1", Kind: contracts.KindTranscript, Body: big}); err != nil {
+	if err = m.Record(ctx, contracts.Node{Key: "raw/s/1", Kind: contracts.KindTranscript, Body: big}); err != nil {
 		t.Fatalf("raw over-budget Record must succeed, got %v", err)
 	}
 	got, err := m.Search(ctx, contracts.Query{Text: "xxx", IncludeRaw: true})
