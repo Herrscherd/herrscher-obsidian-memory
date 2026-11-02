@@ -76,7 +76,7 @@ func TestEnsureAgentAndProjectAreIdempotent(t *testing.T) {
 		t.Fatalf("EnsureAgent: %v", err)
 	}
 
-	proj, err := m.load(contracts.ProjectKey("game"))
+	proj, err := loadNote(t, m, contracts.ProjectKey("game"))
 	if err != nil {
 		t.Fatalf("load project: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestEnsureAgentAndProjectAreIdempotent(t *testing.T) {
 	if err = p.EnsureProject(ctx, contracts.ProjectKey("game"), "game"); err != nil {
 		t.Fatalf("EnsureProject (2nd): %v", err)
 	}
-	got, err := m.load(contracts.ProjectKey("game"))
+	got, err := loadNote(t, m, contracts.ProjectKey("game"))
 	if err != nil {
 		t.Fatalf("reload project: %v", err)
 	}

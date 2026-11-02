@@ -246,7 +246,7 @@ func TestLinksIsIdempotent(t *testing.T) {
 	must(t, m.Record(ctx, contracts.Node{Key: "a", Kind: contracts.KindProject}))
 	must(t, m.Links(ctx, "a", "b", relContains))
 	must(t, m.Links(ctx, "a", "b", relContains))
-	n, err := m.load("a")
+	n, err := loadNote(t, m, "a")
 	must(t, err)
 	count := 0
 	for _, l := range n.Links {
@@ -265,7 +265,7 @@ func TestLinksKeepsExistingRelOnTarget(t *testing.T) {
 	must(t, m.Record(ctx, contracts.Node{Key: "a", Kind: contracts.KindProject}))
 	must(t, m.Links(ctx, "a", "b", "depends-on"))
 	must(t, m.Links(ctx, "a", "b", relContains))
-	n, err := m.load("a")
+	n, err := loadNote(t, m, "a")
 	must(t, err)
 	if len(n.Links) != 1 || n.Links[0].To != "b" || n.Links[0].Rel != "depends-on" {
 		t.Fatalf("want one b/depends-on edge unchanged: %+v", n.Links)
@@ -300,7 +300,7 @@ func TestRecordIsAtomicNoTempLeftBehind(t *testing.T) {
 	if _, err = os.Stat(filepath.Join(dir, "a", "b.md.tmp")); !os.IsNotExist(err) {
 		t.Fatalf("temp file left behind after Record: err=%v", err)
 	}
-	n, err := m.load("a/b")
+	n, err := loadNote(t, m, "a/b")
 	if err != nil || n.Title != "T" {
 		t.Fatalf("node not committed cleanly: %+v err=%v", n, err)
 	}
@@ -340,7 +340,7 @@ func TestConcurrentLinksAllLand(t *testing.T) {
 	}
 	wg.Wait()
 	must(t, errors.Join(errs...))
-	n, err := m.load("a")
+	n, err := loadNote(t, m, "a")
 	must(t, err)
 	if len(n.Links) != 16 {
 		t.Fatalf("want 16 edges after concurrent Links, got %d", len(n.Links))
@@ -671,7 +671,7 @@ func TestRecordLeavesNoTempFile(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(m.root.Name(), "a", "one.md.tmp")); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("temp file left behind: %v", err)
 	}
-	n, err := m.load("a/one")
+	n, err := loadNote(t, m, "a/one")
 	must(t, err)
 	if n.Body != "kept" {
 		t.Fatalf("body: got %q", n.Body)
@@ -682,10 +682,13 @@ func TestErrorsQuoteTheKey(t *testing.T) {
 	ctx := context.Background()
 	m := newTestMem(t)
 	must(t, os.WriteFile(filepath.Join(m.root.Name(), "blocker"), nil, privateFileMode))
-	_, err := m.load("a/absent")
+	_, err := loadNote(t, m, "a/absent")
 	requireQuotedKey(t, err, "a/absent")
 	if !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("missing note: want fs.ErrNotExist, got %v", err)
+	}
+	if want := `obsidian: load "a/absent": `; !strings.HasPrefix(err.Error(), want) {
+		t.Fatalf("missing note: want prefix %q, got %v", want, err)
 	}
 	err = m.Record(ctx, contracts.Node{Key: "a/one", Kind: contracts.KindDecision, Links: []contracts.Link{{To: "a/two", Rel: "x]y"}}})
 	requireQuotedKey(t, err, "a/one")
@@ -714,7 +717,7 @@ func TestRecordRejectsKindThatBreaksFrontmatter(t *testing.T) {
 			if !errors.Is(err, ErrInvalidKind) {
 				t.Fatalf("want ErrInvalidKind, got %v", err)
 			}
-			if _, err = m.load("a/one"); !errors.Is(err, fs.ErrNotExist) {
+			if _, err = loadNote(t, m, "a/one"); !errors.Is(err, fs.ErrNotExist) {
 				t.Fatalf("refused kind still wrote a note: %v", err)
 			}
 		})

@@ -3,6 +3,9 @@
 // Links. The vault is a git-versioned folder; Obsidian is the human UI over it.
 // Cross-process locking is advisory: it uses flock(2) on unix and is a no-op on
 // other platforms, so a vault shared across machines or OS families is not locked.
+// The directory fsync that makes a rename durable is likewise unix only; elsewhere
+// it is skipped. The parse cache trusts a node's size and mtime, so a rewrite by
+// another process that keeps both unchanged is not seen until the next change.
 package obsidian
 
 import (
@@ -17,6 +20,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unicode/utf8"
@@ -38,10 +42,11 @@ const (
 
 // Memory implements contracts.Memory over a markdown vault. All file I/O
 // goes through an *os.Root so a malicious key or an in-vault symlink can never
-// escape the root. The mutex serializes writes within this process; lockFile
-// serializes them across processes (the daemon spawns one bridge subprocess per
-// session, all sharing the same vault), and every write lands atomically via a
-// temp file + rename so a vault never sees a torn document.
+// escape the root. The gate serializes operations within this process, waiting
+// honours the caller's context, and lockFile serializes them across processes (the
+// daemon spawns one bridge subprocess per session, all sharing the same vault).
+// Every write lands atomically via a temp file + rename so a vault never sees a
+// torn document.
 type Memory struct {
 	gate     chan struct{}
 	root     *os.Root
@@ -50,7 +55,7 @@ type Memory struct {
 
 	parseCache map[string]cachedNode
 
-	budget int
+	budget atomic.Int64
 }
 
 type cachedNode struct {
@@ -135,11 +140,9 @@ func cloneNode(node contracts.Node) contracts.Node {
 
 // SetNodeBudget sets the per-node Body budget in runes; 0 (the default) disables
 // enforcement. When positive, Record returns *contracts.BudgetError for any node
-// whose Body exceeds it, so the caller must consolidate or replace the body to fit (G1).
+// whose Body exceeds it, so the caller must consolidate or replace the body to fit.
 func (m *Memory) SetNodeBudget(runes int) {
-	m.gate <- struct{}{}
-	defer m.releaseGate()
-	m.budget = runes
+	m.budget.Store(int64(runes))
 }
 
 func (m *Memory) loadUnlocked(key string) (contracts.Node, error) {
@@ -154,9 +157,9 @@ func (m *Memory) loadUnlocked(key string) (contracts.Node, error) {
 }
 
 func (m *Memory) recordUnlocked(node contracts.Node) error {
-	if m.budget > 0 && node.Kind != contracts.KindTranscript {
-		if r := utf8.RuneCountInString(node.Body); r > m.budget {
-			return &contracts.BudgetError{Key: node.Key, Runes: r, Limit: m.budget}
+	if limit := m.budget.Load(); limit > 0 && node.Kind != contracts.KindTranscript {
+		if r := utf8.RuneCountInString(node.Body); int64(r) > limit {
+			return &contracts.BudgetError{Key: node.Key, Runes: r, Limit: int(limit)}
 		}
 	}
 	return m.writeNode(node, true)
@@ -247,7 +250,7 @@ func (m *Memory) commitNode(rel string, node contracts.Node) error {
 	}
 	m.forget(rel)
 	if err := m.syncDir(); err != nil {
-		return fmt.Errorf("obsidian: commit %q: %w", node.Key, err)
+		return fmt.Errorf("obsidian: node %q is committed but the directory sync failed: %w", node.Key, err)
 	}
 	return nil
 }
@@ -258,25 +261,14 @@ func (m *Memory) writeSynced(name string, data []byte) error {
 		return err
 	}
 	_, writeErr := file.Write(data)
-	return errors.Join(writeErr, file.Sync(), file.Close())
-}
-
-func (m *Memory) syncDir() error {
-	dir, err := m.root.Open(".")
-	if err != nil {
-		return err
+	if err = errors.Join(writeErr, file.Sync(), file.Close()); err != nil {
+		return errors.Join(err, m.root.Remove(name))
 	}
-	return errors.Join(dir.Sync(), dir.Close())
+	return nil
 }
 
 func (m *Memory) forget(rel string) {
 	delete(m.parseCache, filepath.ToSlash(rel))
-}
-
-func (m *Memory) load(key string) (contracts.Node, error) {
-	m.gate <- struct{}{}
-	defer m.releaseGate()
-	return m.loadUnlocked(key)
 }
 
 // Record upserts a node: keyToRel is deterministic, so writing the same Key

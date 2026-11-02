@@ -61,11 +61,11 @@ func TestRecordDoesNotMutateCallerMeta(t *testing.T) {
 	if len(shared) != 1 {
 		t.Fatalf("caller meta mutated: %v", shared)
 	}
-	one, err := m.load("a/one")
+	one, err := loadNote(t, m, "a/one")
 	if err != nil {
 		t.Fatal(err)
 	}
-	two, err := m.load("a/two")
+	two, err := loadNote(t, m, "a/two")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,13 +327,59 @@ func TestWaitingWritersHonourContextWhileLockIsHeld(t *testing.T) {
 	go func() {
 		inFlight <- m.Record(ctx, contracts.Node{Key: "a/one", Kind: contracts.KindDecision})
 	}()
+	waitForGateHeld(t, m)
 	short, stop := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer stop()
-	if err = m.Record(short, contracts.Node{Key: "a/two", Kind: contracts.KindDecision}); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("second writer: want context.DeadlineExceeded, got %v", err)
+	waiting := make(chan error, 1)
+	go func() {
+		waiting <- m.Record(short, contracts.Node{Key: "a/two", Kind: contracts.KindDecision})
+	}()
+	select {
+	case err = <-waiting:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("second writer: want context.DeadlineExceeded, got %v", err)
+		}
+	case <-time.After(hangGuard):
+		t.Fatal("second writer ignored its context while waiting for the vault gate")
 	}
 	cancel()
-	if err = <-inFlight; !errors.Is(err, context.Canceled) {
-		t.Fatalf("first writer: want context.Canceled, got %v", err)
+	select {
+	case err = <-inFlight:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("first writer: want context.Canceled, got %v", err)
+		}
+	case <-time.After(hangGuard):
+		t.Fatal("first writer ignored its cancelled context")
+	}
+}
+
+func TestCancelledWaitReleasesGate(t *testing.T) {
+	m := newTestMem(t)
+	peer, err := New(m.root.Name())
+	must(t, err)
+	closeOnCleanup(t, peer)
+	release, err := peer.flock(context.Background())
+	must(t, err)
+	short, stop := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer stop()
+	if err = m.Record(short, contracts.Node{Key: "a/one", Kind: contracts.KindDecision}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("blocked writer: want context.DeadlineExceeded, got %v", err)
+	}
+	must(t, release())
+	later, stopLater := context.WithTimeout(context.Background(), hangGuard)
+	defer stopLater()
+	must(t, m.Record(later, contracts.Node{Key: "a/two", Kind: contracts.KindDecision}))
+}
+
+const hangGuard = 5 * time.Second
+
+func waitForGateHeld(t *testing.T, m *Memory) {
+	t.Helper()
+	deadline := time.Now().Add(hangGuard)
+	for len(m.gate) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("first writer never acquired the vault gate")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
