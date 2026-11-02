@@ -124,7 +124,8 @@ func unmarshalNode(key string, data []byte) contracts.Node {
 	n := contracts.Node{Key: key, Meta: map[string]string{}}
 	s := string(data)
 
-	front, body, ok := splitFrontmatter(s)
+	split, ok := splitFrontmatter(s)
+	front, body := split.front, split.body
 	if ok {
 		for _, line := range strings.Split(front, "\n") {
 			k, v, ok := strings.Cut(line, ":")
@@ -151,9 +152,13 @@ func unmarshalNode(key string, data []byte) contracts.Node {
 	return n
 }
 
-func splitFrontmatter(s string) (string, string, bool) {
+type splitNote struct {
+	front, body string
+}
+
+func splitFrontmatter(s string) (splitNote, bool) {
 	if !strings.HasPrefix(s, "---\n") {
-		return "", s, false
+		return splitNote{body: s}, false
 	}
 	rest := s[4:]
 	for off := 0; off <= len(rest); {
@@ -165,14 +170,14 @@ func splitFrontmatter(s string) (string, string, bool) {
 		}
 		if cur == "---" {
 			if nl < 0 {
-				return rest[:off], "", true
+				return splitNote{front: rest[:off]}, true
 			}
-			return rest[:off], rest[off+nl+1:], true
+			return splitNote{front: rest[:off], body: rest[off+nl+1:]}, true
 		}
 		if nl < 0 {
 			break
 		}
 		off += nl + 1
 	}
-	return "", s, false
+	return splitNote{body: s}, false
 }

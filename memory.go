@@ -281,8 +281,8 @@ func (m *ObsidianMemory) recallUnlocked(ctx context.Context, key string, depth i
 	}
 	frontier := []contracts.Node{root}
 	for d := 0; d < depth && len(frontier) > 0; d++ {
-		if err = ctx.Err(); err != nil {
-			return contracts.Subgraph{}, err
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return contracts.Subgraph{}, ctxErr
 		}
 		frontier, err = m.expandFrontier(walk, frontier)
 		if err != nil {
@@ -428,12 +428,12 @@ func (m *ObsidianMemory) searchUnlocked(ctx context.Context, q contracts.Query) 
 	fsys := m.root.FS()
 	var out []contracts.Node
 	seen := make(map[string]struct{}, len(m.parseCache))
-	err := fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+	err := fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
 		}
-		if err = ctx.Err(); err != nil {
-			return err
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
 		}
 		if !d.Type().IsRegular() || !strings.HasSuffix(path, ".md") {
 			return nil

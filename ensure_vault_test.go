@@ -1,6 +1,7 @@
 package obsidian
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -52,7 +53,7 @@ func TestEnsureVaultNeverOverwritesExistingObsidianConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != string(custom) {
+	if !bytes.Equal(got, custom) {
 		t.Fatalf("app.json overwritten: got %q, want %q", got, custom)
 	}
 }
