@@ -5,11 +5,11 @@ import (
 	"testing"
 )
 
-func closeOnCleanup(t testing.TB, c io.Closer) {
-	t.Helper()
-	t.Cleanup(func() {
+func closeOnCleanup(tb testing.TB, c io.Closer) {
+	tb.Helper()
+	tb.Cleanup(func() {
 		if err := c.Close(); err != nil {
-			t.Error(err)
+			tb.Error(err)
 		}
 	})
 }

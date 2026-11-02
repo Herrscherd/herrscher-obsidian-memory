@@ -5,31 +5,25 @@ import (
 	"testing"
 )
 
-func must(t testing.TB, err error) {
-	t.Helper()
+func must(tb testing.TB, err error) {
+	tb.Helper()
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 }
 
-func mustValue[T any](t testing.TB, v T, err error) T {
-	t.Helper()
-	must(t, err)
-	return v
-}
-
-func closeOnCleanup(t testing.TB, c io.Closer) {
-	t.Helper()
-	t.Cleanup(func() {
+func closeOnCleanup(tb testing.TB, c io.Closer) {
+	tb.Helper()
+	tb.Cleanup(func() {
 		if err := c.Close(); err != nil {
-			t.Error(err)
+			tb.Error(err)
 		}
 	})
 }
 
-func mustNew(t testing.TB, root string) *ObsidianMemory {
-	t.Helper()
+func mustNew(tb testing.TB, root string) *ObsidianMemory {
+	tb.Helper()
 	m, err := New(root)
-	must(t, err)
+	must(tb, err)
 	return m
 }

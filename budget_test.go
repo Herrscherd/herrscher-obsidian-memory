@@ -68,7 +68,8 @@ func TestRecordTranscriptBypassesBudget(t *testing.T) {
 	big := strings.Repeat("x", 500)
 
 	err = m.Record(ctx, contracts.Node{Key: "projects/p/fact", Kind: contracts.KindProject, Body: big})
-	if _, ok := err.(*contracts.BudgetError); !ok {
+	var budgetErr *contracts.BudgetError
+	if !errors.As(err, &budgetErr) {
 		t.Fatalf("distilled over-budget Record: got %v, want *BudgetError", err)
 	}
 

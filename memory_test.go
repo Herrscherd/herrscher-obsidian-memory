@@ -327,7 +327,7 @@ func TestConcurrentLinksAllLand(t *testing.T) {
 	ctx := context.Background()
 	must(t, m.Record(ctx, contracts.Node{Key: "a", Kind: contracts.KindProject}))
 	var wg sync.WaitGroup
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
