@@ -28,52 +28,70 @@ func frontKey(s string) string {
 }
 
 func marshalNode(n contracts.Node) string {
+	return frontMatter(n) + withMissingLinks(n.Body, n.Links)
+}
+
+func frontMatter(n contracts.Node) string {
 	var b strings.Builder
 	b.WriteString("---\n")
 	b.WriteString("type: " + string(n.Kind) + "\n")
 	if n.Title != "" {
 		b.WriteString("title: " + frontValue(n.Title) + "\n")
 	}
-	keys := make([]string, 0, len(n.Meta))
-	for k := range n.Meta {
+	for _, k := range writableMetaKeys(n.Meta) {
+		b.WriteString(frontKey(k) + ": " + frontValue(n.Meta[k]) + "\n")
+	}
+	b.WriteString("---\n")
+	return b.String()
+}
+
+func writableMetaKeys(meta map[string]string) []string {
+	keys := make([]string, 0, len(meta))
+	for k := range meta {
 		if fk := frontKey(k); fk == "" || fk == "type" || fk == "title" {
 			continue
 		}
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	for _, k := range keys {
-		b.WriteString(frontKey(k) + ": " + frontValue(n.Meta[k]) + "\n")
-	}
-	b.WriteString("---\n")
+	return keys
+}
 
-	body := n.Body
+func withMissingLinks(body string, links []contracts.Link) string {
+	missing := missingLinkLines(body, links)
+	if len(missing) == 0 {
+		return body
+	}
+	var b strings.Builder
+	b.WriteString(body)
+	if !strings.HasSuffix(body, "\n") {
+		b.WriteString("\n")
+	}
+	if !liensHeaderRe.MatchString(body) {
+		b.WriteString("\n" + liensHeader + "\n")
+	}
+	b.WriteString(strings.Join(missing, "\n") + "\n")
+	return b.String()
+}
+
+func missingLinkLines(body string, links []contracts.Link) []string {
 	present := map[string]bool{}
 	for _, m := range wikilinkRe.FindAllStringSubmatch(body, -1) {
 		present[m[1]] = true
 	}
-	missing := make([]string, 0, len(n.Links))
-	for _, l := range n.Links {
-		if !present[l.To] {
-			tag := l.To
-			if l.Rel != "" {
-				tag += "|" + l.Rel
-			}
-			missing = append(missing, "- [["+tag+"]]")
-			present[l.To] = true
+	missing := make([]string, 0, len(links))
+	for _, l := range links {
+		if present[l.To] {
+			continue
 		}
+		tag := l.To
+		if l.Rel != "" {
+			tag += "|" + l.Rel
+		}
+		missing = append(missing, "- [["+tag+"]]")
+		present[l.To] = true
 	}
-	b.WriteString(body)
-	if len(missing) > 0 {
-		if !strings.HasSuffix(body, "\n") {
-			b.WriteString("\n")
-		}
-		if !liensHeaderRe.MatchString(body) {
-			b.WriteString("\n" + liensHeader + "\n")
-		}
-		b.WriteString(strings.Join(missing, "\n") + "\n")
-	}
-	return b.String()
+	return missing
 }
 
 func exciseWikilinks(body, to string) string {

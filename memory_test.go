@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -543,61 +544,73 @@ func TestWriteNodeHonorsSuppliedLastSeen(t *testing.T) {
 }
 
 func TestArchivedExclusion(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		name string
+		keys func(context.Context, *ObsidianMemory) ([]string, error)
+		want []string
+	}{
+		{
+			name: "default Search hides the archived node",
+			keys: func(ctx context.Context, m *ObsidianMemory) ([]string, error) {
+				hits, err := m.Search(ctx, contracts.Query{Text: "keyword"})
+				return keysOfNodes(hits), err
+			},
+			want: []string{"root"},
+		},
+		{
+			name: "IncludeArchived Search returns the archived node",
+			keys: func(ctx context.Context, m *ObsidianMemory) ([]string, error) {
+				hits, err := m.Search(ctx, contracts.Query{Text: "keyword", IncludeArchived: true})
+				return keysOfNodes(hits), err
+			},
+			want: []string{"old", "root"},
+		},
+		{
+			name: "Recall from the root leaves the archived neighbor out",
+			keys: func(ctx context.Context, m *ObsidianMemory) ([]string, error) {
+				sg, err := m.Recall(ctx, "root", 1)
+				return keysOfNodes(sg.Nodes), err
+			},
+			want: []string{},
+		},
+		{
+			name: "direct Recall returns the archived root",
+			keys: func(ctx context.Context, m *ObsidianMemory) ([]string, error) {
+				sg, err := m.Recall(ctx, "old", 0)
+				return []string{sg.Root.Key}, err
+			},
+			want: []string{"old"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := archivedFixture(ctx, t)
+			keys, err := c.keys(ctx, m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			slices.Sort(keys)
+			if !slices.Equal(keys, c.want) {
+				t.Fatalf("keys = %q, want %q", keys, c.want)
+			}
+		})
+	}
+}
+
+func archivedFixture(ctx context.Context, t *testing.T) *ObsidianMemory {
+	t.Helper()
 	m, err := New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := context.Background()
 	archived := map[string]string{contracts.MetaState: contracts.StateArchived}
-
-	if err = m.Record(ctx, contracts.Node{
+	must(t, m.Record(ctx, contracts.Node{
 		Key: "root", Body: "keyword root",
 		Links: []contracts.Link{{To: "old", Rel: "rel"}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err = m.Record(ctx, contracts.Node{Key: "old", Body: "keyword old", Meta: archived}); err != nil {
-		t.Fatal(err)
-	}
-
-	hits, err := m.Search(ctx, contracts.Query{Text: "keyword"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, n := range hits {
-		if n.Key == "old" {
-			t.Fatalf("archived node returned by default Search")
-		}
-	}
-	hits, err = m.Search(ctx, contracts.Query{Text: "keyword", IncludeArchived: true})
-	must(t, err)
-	found := false
-	for _, n := range hits {
-		if n.Key == "old" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("archived node missing with IncludeArchived=true")
-	}
-
-	sg, err := m.Recall(ctx, "root", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, n := range sg.Nodes {
-		if n.Key == "old" {
-			t.Fatalf("archived neighbor leaked into Recall")
-		}
-	}
-
-	sg, err = m.Recall(ctx, "old", 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if sg.Root.Key != "old" {
-		t.Fatalf("archived root not returned by direct Recall: %q", sg.Root.Key)
-	}
+	}))
+	must(t, m.Record(ctx, contracts.Node{Key: "old", Body: "keyword old", Meta: archived}))
+	return m
 }
 
 func TestRecallHidesTranscriptNeighbor(t *testing.T) {

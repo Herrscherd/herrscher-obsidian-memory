@@ -138,6 +138,18 @@ func (m *ObsidianMemory) recordUnlockedNoReload(n contracts.Node) error {
 }
 
 func (m *ObsidianMemory) writeNode(n contracts.Node, reloadPrior bool) error {
+	if err := validateNodeKeys(n); err != nil {
+		return err
+	}
+	n = m.stampedNode(n, reloadPrior)
+	rel := keyToRel(n.Key)
+	if err := m.ensureParentDir(rel, n.Key); err != nil {
+		return err
+	}
+	return m.commitNode(rel, n)
+}
+
+func validateNodeKeys(n contracts.Node) error {
 	if err := validKey(n.Key); err != nil {
 		return err
 	}
@@ -149,30 +161,51 @@ func (m *ObsidianMemory) writeNode(n contracts.Node, reloadPrior bool) error {
 			return fmt.Errorf("%w: node %q link relation %q contains %q, which a wikilink cannot carry", ErrInvalidLink, n.Key, l.Rel, l.Rel[i:i+1])
 		}
 	}
+	return nil
+}
+
+func (m *ObsidianMemory) stampedNode(n contracts.Node, reloadPrior bool) contracts.Node {
 	n.Meta = maps.Clone(n.Meta)
 	if n.Meta == nil {
 		n.Meta = map[string]string{}
 	}
 	if n.Meta["capturedAt"] == "" {
-		at := m.now().UTC().Format(time.RFC3339)
-		if reloadPrior {
-			if existing, err := m.loadUnlocked(n.Key); err == nil {
-				if prior := existing.Meta["capturedAt"]; prior != "" {
-					at = prior
-				}
-			}
-		}
-		n.Meta["capturedAt"] = at
+		n.Meta["capturedAt"] = m.capturedAtFor(n.Key, reloadPrior)
 	}
 	if n.Meta[contracts.MetaLastSeen] == "" {
-		n.Meta[contracts.MetaLastSeen] = m.now().UTC().Format(time.RFC3339)
+		n.Meta[contracts.MetaLastSeen] = m.nowStamp()
 	}
-	rel := keyToRel(n.Key)
-	if dir := filepath.Dir(rel); dir != "." {
-		if err := m.root.MkdirAll(dir, privateDirMode); err != nil {
-			return fmt.Errorf("obsidian: mkdir for %q: %w", n.Key, err)
+	return n
+}
+
+func (m *ObsidianMemory) capturedAtFor(key string, reloadPrior bool) string {
+	at := m.nowStamp()
+	if reloadPrior {
+		if existing, err := m.loadUnlocked(key); err == nil {
+			if prior := existing.Meta["capturedAt"]; prior != "" {
+				return prior
+			}
 		}
 	}
+	return at
+}
+
+func (m *ObsidianMemory) nowStamp() string {
+	return m.now().UTC().Format(time.RFC3339)
+}
+
+func (m *ObsidianMemory) ensureParentDir(rel, key string) error {
+	dir := filepath.Dir(rel)
+	if dir == "." {
+		return nil
+	}
+	if err := m.root.MkdirAll(dir, privateDirMode); err != nil {
+		return fmt.Errorf("obsidian: mkdir for %q: %w", key, err)
+	}
+	return nil
+}
+
+func (m *ObsidianMemory) commitNode(rel string, n contracts.Node) error {
 	tmp := rel + ".tmp"
 	if err := m.root.WriteFile(tmp, []byte(marshalNode(n)), privateFileMode); err != nil {
 		return fmt.Errorf("obsidian: write %q: %w", n.Key, err)
@@ -263,26 +296,36 @@ func (m *ObsidianMemory) expandFrontier(walk *recallWalk, frontier []contracts.N
 	var next []contracts.Node
 	for _, n := range frontier {
 		for _, l := range n.Links {
-			walk.addEdge(l)
-			if walk.seen[l.To] {
-				continue
-			}
-			walk.seen[l.To] = true
-			child, err := m.loadUnlocked(l.To)
+			child, admitted, err := m.visitLink(walk, l)
 			if err != nil {
-				if errors.Is(err, fs.ErrNotExist) {
-					continue
-				}
-				return nil, fmt.Errorf("obsidian: recall %q: neighbor %q: %w", walk.key, l.To, err)
+				return nil, err
 			}
-			if child.Meta[contracts.MetaState] == contracts.StateArchived || child.Kind == contracts.KindTranscript {
-				continue
+			if admitted {
+				walk.sg.Nodes = append(walk.sg.Nodes, child)
+				next = append(next, child)
 			}
-			walk.sg.Nodes = append(walk.sg.Nodes, child)
-			next = append(next, child)
 		}
 	}
 	return next, nil
+}
+
+func (m *ObsidianMemory) visitLink(walk *recallWalk, l contracts.Link) (contracts.Node, bool, error) {
+	walk.addEdge(l)
+	if walk.seen[l.To] {
+		return contracts.Node{}, false, nil
+	}
+	walk.seen[l.To] = true
+	child, err := m.loadUnlocked(l.To)
+	if errors.Is(err, fs.ErrNotExist) {
+		return contracts.Node{}, false, nil
+	}
+	if err != nil {
+		return contracts.Node{}, false, fmt.Errorf("obsidian: recall %q: neighbor %q: %w", walk.key, l.To, err)
+	}
+	if child.Meta[contracts.MetaState] == contracts.StateArchived || child.Kind == contracts.KindTranscript {
+		return contracts.Node{}, false, nil
+	}
+	return child, true, nil
 }
 
 // Links adds a typed edge from→to as a [[to|rel]] wikilink in the source's body.
@@ -396,11 +439,7 @@ func (m *ObsidianMemory) searchUnlocked(ctx context.Context, q contracts.Query) 
 			return nil
 		}
 		seen[path] = struct{}{}
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-		n, err := m.cachedNode(fsys, path, info)
+		n, err := m.nodeAtPath(fsys, path, d)
 		if err != nil {
 			return err
 		}
@@ -412,18 +451,34 @@ func (m *ObsidianMemory) searchUnlocked(ctx context.Context, q contracts.Query) 
 	if err != nil {
 		return nil, fmt.Errorf("obsidian: search: %w", err)
 	}
-	for p := range m.parseCache {
-		if _, ok := seen[p]; !ok {
-			delete(m.parseCache, p)
-		}
-	}
+	m.pruneParseCache(seen)
 	if q.Ranked {
 		rankByRelevance(out, q.Text, m.now().UTC())
 	}
-	if q.Limit > 0 && len(out) > q.Limit {
-		out = out[:q.Limit]
+	return limitNodes(out, q.Limit), nil
+}
+
+func (m *ObsidianMemory) nodeAtPath(fsys fs.FS, path string, d fs.DirEntry) (contracts.Node, error) {
+	info, err := d.Info()
+	if err != nil {
+		return contracts.Node{}, err
 	}
-	return out, nil
+	return m.cachedNode(fsys, path, info)
+}
+
+func (m *ObsidianMemory) pruneParseCache(live map[string]struct{}) {
+	for p := range m.parseCache {
+		if _, ok := live[p]; !ok {
+			delete(m.parseCache, p)
+		}
+	}
+}
+
+func limitNodes(out []contracts.Node, limit int) []contracts.Node {
+	if limit > 0 && len(out) > limit {
+		return out[:limit]
+	}
+	return out
 }
 
 func (m *ObsidianMemory) cachedNode(fsys fs.FS, path string, info fs.FileInfo) (contracts.Node, error) {
@@ -452,51 +507,49 @@ func rankByRelevance(out []contracts.Node, text string, now time.Time) {
 }
 
 func matchesQuery(n contracts.Node, q contracts.Query) bool {
+	return visibleInQuery(n, q) && matchesKinds(n, q.Kinds) && matchesText(n, q.Text) && matchesTags(n, q.Tags)
+}
+
+func visibleInQuery(n contracts.Node, q contracts.Query) bool {
 	if n.Meta[contracts.MetaState] == contracts.StateArchived && !q.IncludeArchived {
 		return false
 	}
-	if n.Kind == contracts.KindTranscript && !q.IncludeRaw {
-		return false
+	return n.Kind != contracts.KindTranscript || q.IncludeRaw
+}
+
+func matchesKinds(n contracts.Node, kinds []contracts.NodeKind) bool {
+	return len(kinds) == 0 || slices.Contains(kinds, n.Kind)
+}
+
+func matchesText(n contracts.Node, text string) bool {
+	if text == "" {
+		return true
 	}
-	if len(q.Kinds) > 0 {
-		ok := false
-		for _, k := range q.Kinds {
-			if n.Kind == k {
-				ok = true
-				break
-			}
-		}
-		if !ok {
+	hay := strings.ToLower(n.Title + "\n" + n.Body)
+	return strings.Contains(hay, strings.ToLower(text))
+}
+
+func matchesTags(n contracts.Node, tags []string) bool {
+	for _, want := range tags {
+		if !hasTag(n, want) {
 			return false
-		}
-	}
-	if q.Text != "" {
-		hay := strings.ToLower(n.Title + "\n" + n.Body)
-		if !strings.Contains(hay, strings.ToLower(q.Text)) {
-			return false
-		}
-	}
-	if len(q.Tags) > 0 {
-		rawTags := strings.ToLower(n.Meta["tags"])
-		domain := strings.TrimSpace(strings.ToLower(n.Meta["domain"]))
-		for _, want := range q.Tags {
-			w := strings.ToLower(want)
-			if domain != "" && w == domain {
-				continue
-			}
-			found := false
-			for _, t := range strings.Split(rawTags, ",") {
-				if strings.TrimSpace(t) == w {
-					found = true
-					break
-				}
-			}
-			if !found {
-				return false
-			}
 		}
 	}
 	return true
+}
+
+func hasTag(n contracts.Node, want string) bool {
+	w := strings.ToLower(want)
+	domain := strings.TrimSpace(strings.ToLower(n.Meta["domain"]))
+	if domain != "" && w == domain {
+		return true
+	}
+	for _, t := range strings.Split(strings.ToLower(n.Meta["tags"]), ",") {
+		if strings.TrimSpace(t) == w {
+			return true
+		}
+	}
+	return false
 }
 
 func recencyRank(n contracts.Node, now time.Time) float64 {
