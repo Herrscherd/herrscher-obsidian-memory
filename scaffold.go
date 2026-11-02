@@ -2,6 +2,7 @@ package obsidian
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	contracts "github.com/Herrscherd/herrscher-contracts"
@@ -135,7 +136,11 @@ func (m *ObsidianMemory) ensure(ctx context.Context, n contracts.Node) error {
 	if err != nil {
 		return err
 	}
-	defer release()
+	err = m.ensureUnlocked(n)
+	return errors.Join(err, release())
+}
+
+func (m *ObsidianMemory) ensureUnlocked(n contracts.Node) error {
 	if _, err := m.root.Stat(keyToRel(n.Key)); err == nil {
 		return nil
 	}

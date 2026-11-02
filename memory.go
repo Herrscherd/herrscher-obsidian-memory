@@ -73,11 +73,11 @@ func New(root string) (*ObsidianMemory, error) {
 	return &ObsidianMemory{root: r, lockFile: lf, now: time.Now, parseCache: map[string]cachedNode{}}, nil
 }
 
-func (m *ObsidianMemory) flock(ctx context.Context) (func(), error) {
+func (m *ObsidianMemory) flock(ctx context.Context) (func() error, error) {
 	for {
 		err := lockFD(m.lockFile.Fd())
 		if err == nil {
-			return func() { _ = unlockFD(m.lockFile.Fd()) }, nil
+			return func() error { return unlockFD(m.lockFile.Fd()) }, nil
 		}
 		if !errors.Is(err, syscall.EWOULDBLOCK) {
 			return nil, fmt.Errorf("obsidian: vault lock: %w", err)
@@ -193,8 +193,8 @@ func (m *ObsidianMemory) Record(ctx context.Context, n contracts.Node) error {
 	if err != nil {
 		return err
 	}
-	defer release()
-	return m.recordUnlocked(n)
+	err = m.recordUnlocked(n)
+	return errors.Join(err, release())
 }
 
 // Recall loads the root node and breadth-first follows its links up to depth.
@@ -208,50 +208,73 @@ func (m *ObsidianMemory) Recall(ctx context.Context, key string, depth int) (con
 	if err != nil {
 		return contracts.Subgraph{}, err
 	}
-	defer release()
+	sg, err := m.recallUnlocked(ctx, key, depth)
+	return sg, errors.Join(err, release())
+}
+
+type recallWalk struct {
+	key   string
+	sg    contracts.Subgraph
+	seen  map[string]bool
+	edges map[contracts.Link]bool
+}
+
+func (w *recallWalk) addEdge(l contracts.Link) {
+	if w.edges[l] {
+		return
+	}
+	w.edges[l] = true
+	w.sg.Edges = append(w.sg.Edges, l)
+}
+
+func (m *ObsidianMemory) recallUnlocked(ctx context.Context, key string, depth int) (contracts.Subgraph, error) {
 	root, err := m.loadUnlocked(key)
 	if err != nil {
 		return contracts.Subgraph{}, err
 	}
-	sg := contracts.Subgraph{Root: root}
-	seen := map[string]bool{key: true}
-	edges := map[contracts.Link]bool{}
+	walk := &recallWalk{
+		key:   key,
+		sg:    contracts.Subgraph{Root: root},
+		seen:  map[string]bool{key: true},
+		edges: map[contracts.Link]bool{},
+	}
 	frontier := []contracts.Node{root}
 	for d := 0; d < depth && len(frontier) > 0; d++ {
-		if err := ctx.Err(); err != nil {
+		if err = ctx.Err(); err != nil {
 			return contracts.Subgraph{}, err
 		}
-		var next []contracts.Node
-		for _, n := range frontier {
-			for _, l := range n.Links {
-				if !edges[l] {
-					edges[l] = true
-					sg.Edges = append(sg.Edges, l)
-				}
-				if seen[l.To] {
-					continue
-				}
-				seen[l.To] = true
-				child, err := m.loadUnlocked(l.To)
-				if err != nil {
-					if errors.Is(err, fs.ErrNotExist) {
-						continue
-					}
-					return contracts.Subgraph{}, fmt.Errorf("obsidian: recall %q: neighbor %q: %w", key, l.To, err)
-				}
-				if child.Meta[contracts.MetaState] == contracts.StateArchived {
-					continue
-				}
-				if child.Kind == contracts.KindTranscript {
-					continue
-				}
-				sg.Nodes = append(sg.Nodes, child)
-				next = append(next, child)
-			}
+		frontier, err = m.expandFrontier(walk, frontier)
+		if err != nil {
+			return contracts.Subgraph{}, err
 		}
-		frontier = next
 	}
-	return sg, nil
+	return walk.sg, nil
+}
+
+func (m *ObsidianMemory) expandFrontier(walk *recallWalk, frontier []contracts.Node) ([]contracts.Node, error) {
+	var next []contracts.Node
+	for _, n := range frontier {
+		for _, l := range n.Links {
+			walk.addEdge(l)
+			if walk.seen[l.To] {
+				continue
+			}
+			walk.seen[l.To] = true
+			child, err := m.loadUnlocked(l.To)
+			if err != nil {
+				if errors.Is(err, fs.ErrNotExist) {
+					continue
+				}
+				return nil, fmt.Errorf("obsidian: recall %q: neighbor %q: %w", walk.key, l.To, err)
+			}
+			if child.Meta[contracts.MetaState] == contracts.StateArchived || child.Kind == contracts.KindTranscript {
+				continue
+			}
+			walk.sg.Nodes = append(walk.sg.Nodes, child)
+			next = append(next, child)
+		}
+	}
+	return next, nil
 }
 
 // Links adds a typed edge from→to as a [[to|rel]] wikilink in the source's body.
@@ -268,7 +291,11 @@ func (m *ObsidianMemory) Links(ctx context.Context, from, to, rel string) error 
 	if err != nil {
 		return err
 	}
-	defer release()
+	err = m.linksUnlocked(from, to, rel)
+	return errors.Join(err, release())
+}
+
+func (m *ObsidianMemory) linksUnlocked(from, to, rel string) error {
 	n, err := m.loadUnlocked(from)
 	if err != nil {
 		return err
@@ -298,7 +325,11 @@ func (m *ObsidianMemory) Unlink(ctx context.Context, from, to string) error {
 	if err != nil {
 		return err
 	}
-	defer release()
+	err = m.unlinkUnlocked(from, to)
+	return errors.Join(err, release())
+}
+
+func (m *ObsidianMemory) unlinkUnlocked(from, to string) error {
 	n, err := m.loadUnlocked(from)
 	if err != nil {
 		return err
@@ -338,15 +369,19 @@ func (m *ObsidianMemory) Search(ctx context.Context, q contracts.Query) ([]contr
 	if err != nil {
 		return nil, err
 	}
-	defer release()
+	out, err := m.searchUnlocked(ctx, q)
+	return out, errors.Join(err, release())
+}
+
+func (m *ObsidianMemory) searchUnlocked(ctx context.Context, q contracts.Query) ([]contracts.Node, error) {
 	fsys := m.root.FS()
 	var out []contracts.Node
 	seen := make(map[string]struct{}, len(m.parseCache))
-	err = fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if err := ctx.Err(); err != nil {
+		if err = ctx.Err(); err != nil {
 			return err
 		}
 		if !d.Type().IsRegular() || !strings.HasSuffix(path, ".md") {
@@ -357,18 +392,10 @@ func (m *ObsidianMemory) Search(ctx context.Context, q contracts.Query) ([]contr
 		if err != nil {
 			return err
 		}
-		if c, ok := m.parseCache[path]; ok && c.size == info.Size() && c.mod.Equal(info.ModTime()) {
-			if matchesQuery(c.node, q) {
-				out = append(out, cloneNode(c.node))
-			}
-			return nil
-		}
-		data, err := fs.ReadFile(fsys, path)
+		n, err := m.cachedNode(fsys, path, info)
 		if err != nil {
 			return err
 		}
-		n := unmarshalNode(strings.TrimSuffix(path, ".md"), data)
-		m.parseCache[path] = cachedNode{mod: info.ModTime(), size: info.Size(), node: n}
 		if matchesQuery(n, q) {
 			out = append(out, cloneNode(n))
 		}
@@ -383,21 +410,37 @@ func (m *ObsidianMemory) Search(ctx context.Context, q contracts.Query) ([]contr
 		}
 	}
 	if q.Ranked {
-		now := m.now().UTC()
-		scores := make(map[string]float64, len(out))
-		for _, n := range out {
-			if s, textHit := contracts.Score(q.Text, now, n); textHit {
-				scores[n.Key] = s
-				continue
-			}
-			scores[n.Key] = -1 + recencyRank(n, now)/2
-		}
-		sort.SliceStable(out, func(i, j int) bool { return scores[out[i].Key] > scores[out[j].Key] })
+		rankByRelevance(out, q.Text, m.now().UTC())
 	}
 	if q.Limit > 0 && len(out) > q.Limit {
 		out = out[:q.Limit]
 	}
 	return out, nil
+}
+
+func (m *ObsidianMemory) cachedNode(fsys fs.FS, path string, info fs.FileInfo) (contracts.Node, error) {
+	if c, ok := m.parseCache[path]; ok && c.size == info.Size() && c.mod.Equal(info.ModTime()) {
+		return c.node, nil
+	}
+	data, err := fs.ReadFile(fsys, path)
+	if err != nil {
+		return contracts.Node{}, err
+	}
+	n := unmarshalNode(strings.TrimSuffix(path, ".md"), data)
+	m.parseCache[path] = cachedNode{mod: info.ModTime(), size: info.Size(), node: n}
+	return n, nil
+}
+
+func rankByRelevance(out []contracts.Node, text string, now time.Time) {
+	scores := make(map[string]float64, len(out))
+	for _, n := range out {
+		if s, textHit := contracts.Score(text, now, n); textHit {
+			scores[n.Key] = s
+			continue
+		}
+		scores[n.Key] = -1 + recencyRank(n, now)/2
+	}
+	sort.SliceStable(out, func(i, j int) bool { return scores[out[i].Key] > scores[out[j].Key] })
 }
 
 func matchesQuery(n contracts.Node, q contracts.Query) bool {

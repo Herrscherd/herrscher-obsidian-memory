@@ -2,6 +2,7 @@ package obsidian
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"path/filepath"
@@ -27,13 +28,17 @@ func (m *ObsidianMemory) Locate(ctx context.Context, key string) (contracts.Loca
 	if err != nil {
 		return contracts.Location{}, err
 	}
-	defer release()
+	loc, err := m.locateUnlocked(key)
+	return loc, errors.Join(err, release())
+}
+
+func (m *ObsidianMemory) locateUnlocked(key string) (contracts.Location, error) {
 	rel := keyToRel(key)
 	f, err := m.root.Open(rel)
 	if err != nil {
 		return contracts.Location{}, fmt.Errorf("obsidian: locate %q: %w", key, err)
 	}
-	if err := f.Close(); err != nil {
+	if err = f.Close(); err != nil {
 		return contracts.Location{}, fmt.Errorf("obsidian: locate %q: %w", key, err)
 	}
 	abs := filepath.Join(m.root.Name(), rel)

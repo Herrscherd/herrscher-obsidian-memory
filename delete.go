@@ -27,8 +27,11 @@ func (m *ObsidianMemory) Delete(ctx context.Context, key string) error {
 	if err != nil {
 		return err
 	}
-	defer release()
+	err = m.deleteUnlocked(key)
+	return errors.Join(err, release())
+}
 
+func (m *ObsidianMemory) deleteUnlocked(key string) error {
 	rel := keyToRel(key)
 	if err := m.root.Remove(rel); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {

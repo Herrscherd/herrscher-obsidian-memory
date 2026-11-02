@@ -191,7 +191,11 @@ func TestWritesFailWhenLockCannotBeTaken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer release()
+	t.Cleanup(func() {
+		if err := release(); err != nil {
+			t.Error(err)
+		}
+	})
 	err = m.Record(ctx, contracts.Node{Key: "a/one", Kind: contracts.KindDecision})
 	if err == nil {
 		t.Fatal("Record proceeded without the cross-process lock")
