@@ -26,10 +26,6 @@ func TestUnlinkRemovesEdgeAndPreservesProse(t *testing.T) {
 	ctx := context.Background()
 	m := newTestMem(t)
 
-	// A node whose body mixes a human inline wikilink, surrounding prose, a
-	// double-space code line that must survive byte-for-byte, a line-leading
-	// target token, and a managed bullet edge — Unlink removes only edges to
-	// "proj/b" and touches nothing else.
 	code := "    x  =  1  # two-spaced code must survive"
 	body := "See [[proj/b|decided-in]] for context and keep [[proj/c|see-also]] too.\n" +
 		code + "\n" +
@@ -65,17 +61,13 @@ func TestUnlinkRemovesEdgeAndPreservesProse(t *testing.T) {
 	if strings.Contains(sg.Root.Body, "[[proj/b") {
 		t.Fatalf("Unlink left a [[proj/b...]] token in the body: %q", sg.Root.Body)
 	}
-	// The unrelated double-spaced code line survives byte-for-byte (no body-wide
-	// whitespace reflow).
 	if !strings.Contains(sg.Root.Body, code) {
 		t.Fatalf("Unlink mutated an unrelated line; want %q intact in %q", code, sg.Root.Body)
 	}
-	// A line-leading token leaves no orphan leading space.
 	if !strings.Contains(sg.Root.Body, "\nstarts this line.") {
 		t.Fatalf("Unlink left an orphan leading space on the line-leading token: %q", sg.Root.Body)
 	}
 
-	// Idempotent: unlinking an absent edge is a no-op, not an error.
 	if err := m.Unlink(ctx, "proj/a", "proj/b"); err != nil {
 		t.Fatalf("second Unlink should be a no-op, got %v", err)
 	}
@@ -183,7 +175,6 @@ func TestSearchHidesTranscriptUnlessIncludeRaw(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Default query: raw chunk hidden.
 	got, err := m.Search(ctx, contracts.Query{Text: "widget"})
 	if err != nil {
 		t.Fatal(err)
@@ -194,7 +185,6 @@ func TestSearchHidesTranscriptUnlessIncludeRaw(t *testing.T) {
 		}
 	}
 
-	// Sweep-shaped query (IncludeArchived true, IncludeRaw unset): still hidden.
 	got, _ = m.Search(ctx, contracts.Query{Text: "widget", IncludeArchived: true})
 	for _, n := range got {
 		if n.Kind == contracts.KindTranscript {
@@ -202,7 +192,6 @@ func TestSearchHidesTranscriptUnlessIncludeRaw(t *testing.T) {
 		}
 	}
 
-	// Opt-in: raw chunk visible.
 	got, err = m.Search(ctx, contracts.Query{Text: "widget", IncludeRaw: true})
 	if err != nil {
 		t.Fatal(err)
@@ -262,7 +251,7 @@ func TestLinksKeepsExistingRelOnTarget(t *testing.T) {
 	ctx := context.Background()
 	_ = m.Record(ctx, contracts.Node{Key: "a", Kind: contracts.KindProject})
 	_ = m.Links(ctx, "a", "b", "depends-on")
-	_ = m.Links(ctx, "a", "b", "contains") // same target — idempotent, no rewrite
+	_ = m.Links(ctx, "a", "b", "contains")
 	n, _ := m.load("a")
 	if len(n.Links) != 1 || n.Links[0].To != "b" || n.Links[0].Rel != "depends-on" {
 		t.Fatalf("want one b/depends-on edge unchanged: %+v", n.Links)
@@ -417,7 +406,7 @@ func TestRecord_PreservesCapturedAtOnUpsert(t *testing.T) {
 	if err := m.Record(ctx, contracts.Node{Key: "facts/x", Kind: contracts.KindDecision, Title: "v1"}); err != nil {
 		t.Fatal(err)
 	}
-	m.now = func() time.Time { return t1 } // later re-record (upsert)
+	m.now = func() time.Time { return t1 }
 	if err := m.Record(ctx, contracts.Node{Key: "facts/x", Kind: contracts.KindDecision, Title: "v2"}); err != nil {
 		t.Fatal(err)
 	}
@@ -444,8 +433,6 @@ func TestRecord_KeepsCallerSuppliedCapturedAt(t *testing.T) {
 func TestSearch_RankedOrdersByRelevance(t *testing.T) {
 	m := newTestMem(t)
 	ctx := context.Background()
-	// Both contain the query substring "nats" (so both pass the matchesQuery gate);
-	// only their placement differs, so ranking — not the gate — decides order.
 	m.Record(ctx, contracts.Node{Key: "facts/title", Kind: contracts.KindDecision, Title: "nats transport choice", Body: "chosen for decoupling"})
 	m.Record(ctx, contracts.Node{Key: "facts/body", Kind: contracts.KindDecision, Title: "logging note", Body: "we mention nats once here"})
 	got, err := m.Search(ctx, contracts.Query{Text: "nats", Ranked: true})
@@ -460,8 +447,6 @@ func TestSearch_RankedOrdersByRelevance(t *testing.T) {
 func TestSearch_RankedRespectsLimitAsTopK(t *testing.T) {
 	m := newTestMem(t)
 	ctx := context.Background()
-	// Both contain "nats"; facts/both scores higher (title hit + higher tf + durable
-	// kind), so ranked+Limit:1 must return it alone.
 	m.Record(ctx, contracts.Node{Key: "facts/both", Kind: contracts.KindDecision, Title: "nats transport", Body: "nats transport nats"})
 	m.Record(ctx, contracts.Node{Key: "facts/one", Kind: contracts.KindSession, Title: "note", Body: "nats"})
 	got, err := m.Search(ctx, contracts.Query{Text: "nats", Ranked: true, Limit: 1})
@@ -478,7 +463,6 @@ func TestSearch_UnrankedReturnsAllMatches(t *testing.T) {
 	ctx := context.Background()
 	m.Record(ctx, contracts.Node{Key: "a", Kind: contracts.KindDecision, Title: "nats", Body: "x"})
 	m.Record(ctx, contracts.Node{Key: "b", Kind: contracts.KindDecision, Title: "nats deep", Body: "nats nats"})
-	// Ranked:false must preserve today's semantics: all matches, no top-K cut.
 	got, err := m.Search(ctx, contracts.Query{Text: "nats"})
 	if err != nil {
 		t.Fatal(err)
@@ -509,8 +493,6 @@ func TestWriteNodeStampsAndBumpsLastSeen(t *testing.T) {
 	}
 	capturedAt := got.Root.Meta["capturedAt"]
 
-	// Re-record at a later clock with no lastSeen supplied: lastSeen bumps,
-	// capturedAt is preserved.
 	t1 := t0.Add(48 * time.Hour)
 	m.now = func() time.Time { return t1 }
 	if err := m.Record(ctx, contracts.Node{Key: "n1", Body: "hello again"}); err != nil {
@@ -561,7 +543,6 @@ func TestArchivedExclusion(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Search hides archived by default...
 	hits, err := m.Search(ctx, contracts.Query{Text: "keyword"})
 	if err != nil {
 		t.Fatal(err)
@@ -571,7 +552,6 @@ func TestArchivedExclusion(t *testing.T) {
 			t.Fatalf("archived node returned by default Search")
 		}
 	}
-	// ...but IncludeArchived reaches it.
 	hits, _ = m.Search(ctx, contracts.Query{Text: "keyword", IncludeArchived: true})
 	found := false
 	for _, n := range hits {
@@ -583,7 +563,6 @@ func TestArchivedExclusion(t *testing.T) {
 		t.Fatalf("archived node missing with IncludeArchived=true")
 	}
 
-	// Recall from active root: archived neighbor is hidden.
 	sg, err := m.Recall(ctx, "root", 1)
 	if err != nil {
 		t.Fatal(err)
@@ -594,7 +573,6 @@ func TestArchivedExclusion(t *testing.T) {
 		}
 	}
 
-	// Recall of an archived key directly: root still returned.
 	sg, err = m.Recall(ctx, "old", 0)
 	if err != nil {
 		t.Fatal(err)

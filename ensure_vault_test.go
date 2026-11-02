@@ -66,7 +66,6 @@ func TestEnsureAgentAndProjectAreIdempotent(t *testing.T) {
 	defer m.Close()
 	ctx := context.Background()
 
-	// Use the interface, exactly as the host will (type-asserted Provisioner).
 	var p contracts.Provisioner = m
 
 	if err := p.EnsureProject(ctx, contracts.ProjectKey("game"), "game"); err != nil {
@@ -76,7 +75,6 @@ func TestEnsureAgentAndProjectAreIdempotent(t *testing.T) {
 		t.Fatalf("EnsureAgent: %v", err)
 	}
 
-	// Mutate the project node, then re-ensure: an existing node is never clobbered.
 	proj, err := m.load(contracts.ProjectKey("game"))
 	if err != nil {
 		t.Fatalf("load project: %v", err)
@@ -99,7 +97,6 @@ func TestEnsureAgentAndProjectAreIdempotent(t *testing.T) {
 		t.Fatalf("project kind: got %q, want %q", got.Kind, contracts.KindProject)
 	}
 
-	// The provisioned roots make a scoped round-trip work with no missing-root error.
 	s := contracts.MemoryScope{Project: contracts.ProjectKey("game"), Agent: contracts.AgentKey("scripter")}
 	if err := contracts.RecordShared(ctx, m, s, contracts.Node{Key: "facts/eco", Kind: contracts.KindDecision, Title: "eco"}); err != nil {
 		t.Fatalf("RecordShared: %v", err)

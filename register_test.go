@@ -9,7 +9,6 @@ import (
 	contracts "github.com/Herrscherd/herrscher-contracts"
 )
 
-// findPlugin returns the registered obsidian memory plugin.
 func findPlugin(t *testing.T) contracts.Plugin {
 	t.Helper()
 	for _, p := range contracts.Default.Memories() {

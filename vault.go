@@ -12,13 +12,8 @@ var wikilinkRe = regexp.MustCompile(`\[\[([^\]|]+)(?:\|([^\]]+))?\]\]`)
 
 const liensHeader = "## Liens"
 
-// liensHeaderRe matches the "## Liens" trailing links section as a full line, so
-// the header is not suppressed by an incidental "## Liens" substring elsewhere in
-// the body (prose, a quote, a code block).
 var liensHeaderRe = regexp.MustCompile(`(?m)^## Liens[ \t]*$`)
 
-// frontValue keeps a frontmatter scalar on a single line so a value can never
-// inject extra keys or a closing "---" fence.
 func frontValue(s string) string {
 	return strings.NewReplacer("\r", " ", "\n", " ").Replace(s)
 }
@@ -37,7 +32,7 @@ func marshalNode(n contracts.Node) string {
 	keys := make([]string, 0, len(n.Meta))
 	for k := range n.Meta {
 		if fk := frontKey(k); fk == "" || fk == "type" || fk == "title" {
-			continue // reserved for Kind/Title — never let Meta shadow them
+			continue
 		}
 		keys = append(keys, k)
 	}
@@ -76,30 +71,23 @@ func marshalNode(n contracts.Node) string {
 	return b.String()
 }
 
-// exciseWikilinks removes every wikilink whose target key is `to` from body,
-// touching ONLY lines that actually contain such a link so the rest of the
-// human-co-owned note is byte-preserved (no body-wide reflow). A line that is a
-// pure managed bullet ("- [[to|rel]]") is dropped whole; an inline token is
-// removed together with one adjacent space so no gap or leading/trailing space
-// is left behind. Other wikilinks, the "## Liens" header, code blocks, tables,
-// and prose on untouched lines are left exactly as they were.
 func exciseWikilinks(body, to string) string {
 	q := regexp.QuoteMeta(to)
-	tok := `\[\[` + q + `(?:\|[^\]]*)?\]\]` // a wikilink whose target is `to`
-	targetTok := regexp.MustCompile(tok)    // bare token
+	tok := `\[\[` + q + `(?:\|[^\]]*)?\]\]`
+	targetTok := regexp.MustCompile(tok)
 	bulletOnly := regexp.MustCompile(`^\s*- ` + tok + `\s*$`)
-	spaceThenTok := regexp.MustCompile(`[ \t]` + tok) // " [[to]]" — drop token + its leading space
-	tokThenSpace := regexp.MustCompile(tok + `[ \t]`) // "[[to]] " — line-leading fallback
+	spaceThenTok := regexp.MustCompile(`[ \t]` + tok)
+	tokThenSpace := regexp.MustCompile(tok + `[ \t]`)
 
 	lines := strings.Split(body, "\n")
 	kept := make([]string, 0, len(lines))
 	for _, line := range lines {
 		if !targetTok.MatchString(line) {
-			kept = append(kept, line) // no edge to `to` here — preserve verbatim
+			kept = append(kept, line)
 			continue
 		}
 		if bulletOnly.MatchString(line) {
-			continue // pure "- [[to|rel]]" bullet — remove the whole line
+			continue
 		}
 		line = spaceThenTok.ReplaceAllString(line, "")
 		line = tokThenSpace.ReplaceAllString(line, "")
@@ -140,11 +128,6 @@ func unmarshalNode(key string, data []byte) contracts.Node {
 	return n
 }
 
-// splitFrontmatter separates a leading YAML frontmatter block from the body. The
-// opening and closing fences must each be a standalone "---" line: a file that
-// merely begins with a markdown thematic break, or whose only "---" sits mid-line,
-// is treated as pure body so hand-authored notes are never mis-parsed. When no
-// closing fence is found ok is false and the whole input is returned as body.
 func splitFrontmatter(s string) (front, body string, ok bool) {
 	if !strings.HasPrefix(s, "---\n") {
 		return "", s, false

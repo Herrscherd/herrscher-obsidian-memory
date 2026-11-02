@@ -23,12 +23,8 @@ import (
 	contracts "github.com/Herrscherd/herrscher-contracts"
 )
 
-// lockName is the advisory cross-process lock file kept at the vault root. It is
-// a hidden non-markdown file, so Obsidian, git, and Search all ignore it.
 const lockName = ".herrscher.lock"
 
-// lockPollInterval is how often flock retries the non-blocking cross-process lock
-// while a peer holds it, until ctx expires.
 const lockPollInterval = 10 * time.Millisecond
 
 // ObsidianMemory implements contracts.Memory over a markdown vault. All file I/O
@@ -41,17 +37,10 @@ type ObsidianMemory struct {
 	mu       sync.Mutex
 	root     *os.Root
 	lockFile *os.File
-	now      func() time.Time // injectable clock for capturedAt stamping (tests override)
+	now      func() time.Time
 
-	// parseCache memoizes the parsed Node of each .md file so a Search walk only
-	// re-reads and re-parses files whose size or mtime changed since last seen,
-	// turning the repeated whole-vault read+parse+regex into a stat per file for
-	// the unchanged majority. Guarded by mu (Search holds it); every write bumps
-	// the file's mtime via the atomic rename, so stale entries self-invalidate.
 	parseCache map[string]cachedNode
 
-	// budget is the per-node Body rune budget enforced by Record; 0 disables it.
-	// Guarded by mu (SetNodeBudget writes it, recordUnlocked reads it under mu).
 	budget int
 }
 
@@ -85,12 +74,6 @@ func New(root string) (*ObsidianMemory, error) {
 	return &ObsidianMemory{root: r, lockFile: lf, now: time.Now, parseCache: map[string]cachedNode{}}, nil
 }
 
-// flock takes the exclusive cross-process lock and returns its release func. The
-// in-process mutex must already be held so the lock is taken at most once per
-// process at a time. It polls the non-blocking lock so a stuck peer cannot pin
-// the call past ctx; on timeout or a real lock error it logs and proceeds
-// best-effort (the in-process mutex still serializes this process). Callers
-// defer the returned func.
 func (m *ObsidianMemory) flock(ctx context.Context) (func(), error) {
 	for {
 		err := lockFD(m.lockFile.Fd())
@@ -116,7 +99,7 @@ func cloneNode(n contracts.Node) contracts.Node {
 
 // SetNodeBudget sets the per-node Body budget in runes; 0 (the default) disables
 // enforcement. When positive, Record returns *contracts.BudgetError for any node
-// whose Body exceeds it — the caller must consolidate/replace to fit (G1).
+// whose Body exceeds it, so the caller must consolidate or replace the body to fit (G1).
 func (m *ObsidianMemory) SetNodeBudget(runes int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -134,13 +117,7 @@ func (m *ObsidianMemory) loadUnlocked(key string) (contracts.Node, error) {
 	return unmarshalNode(key, data), nil
 }
 
-// recordUnlocked upserts a node, reading the existing file (if any) to preserve a
-// prior capturedAt stamp. Callers that already know no prior file exists, or that
-// carry the loaded node, use recordUnlockedNoReload to skip that read.
 func (m *ObsidianMemory) recordUnlocked(n contracts.Node) error {
-	// KindTranscript is the append-only raw archival tier (G7): it must be stored
-	// verbatim, so the per-node Body budget never applies to it. Every distilled
-	// kind is still subject to the budget.
 	if m.budget > 0 && n.Kind != contracts.KindTranscript {
 		if r := utf8.RuneCountInString(n.Body); r > m.budget {
 			return &contracts.BudgetError{Key: n.Key, Runes: r, Limit: m.budget}
@@ -149,10 +126,6 @@ func (m *ObsidianMemory) recordUnlocked(n contracts.Node) error {
 	return m.writeNode(n, true)
 }
 
-// recordUnlockedNoReload writes without reading the existing file for a prior
-// capturedAt: for ensure the file is known-absent, and for Links the caller passes
-// the already-loaded node (which carries any prior stamp), so the extra read would
-// be pure overhead.
 func (m *ObsidianMemory) recordUnlockedNoReload(n contracts.Node) error {
 	return m.writeNode(n, false)
 }
@@ -161,10 +134,6 @@ func (m *ObsidianMemory) writeNode(n contracts.Node, reloadPrior bool) error {
 	if err := validKey(n.Key); err != nil {
 		return err
 	}
-	// A link target names a node, so it answers to the same rule as a key — and it
-	// needs to, more urgently: the target is what gets written into the body as
-	// `[[to]]`. Refusing here costs the caller an error it can act on; accepting
-	// would store an edge that reads back as a different one, or as none.
 	for _, l := range n.Links {
 		if err := validKey(l.To); err != nil {
 			return fmt.Errorf("obsidian: node %q links to an unusable key: %w", n.Key, err)
@@ -173,9 +142,6 @@ func (m *ObsidianMemory) writeNode(n contracts.Node, reloadPrior bool) error {
 			return fmt.Errorf("obsidian: node %q link relation %q contains %q, which a wikilink cannot carry", n.Key, l.Rel, l.Rel[i:i+1])
 		}
 	}
-	// Stamp capturedAt (RFC3339 UTC) so recall can rank by recency. Only when
-	// absent: a caller-supplied value is kept, and on upsert an existing stored
-	// value is preserved so re-recording the same fact does not reset its age.
 	n.Meta = maps.Clone(n.Meta)
 	if n.Meta == nil {
 		n.Meta = map[string]string{}
@@ -191,10 +157,6 @@ func (m *ObsidianMemory) writeNode(n contracts.Node, reloadPrior bool) error {
 		}
 		n.Meta["capturedAt"] = at
 	}
-	// Stamp lastSeen (RFC3339 UTC) — the staleness machine's age basis. Unlike
-	// capturedAt, it is NOT preserved on upsert: an ordinary re-record bumps it
-	// to now (reactivation), while the curator sweep re-supplies the existing
-	// value so a state-only write leaves the node's age untouched.
 	if n.Meta[contracts.MetaLastSeen] == "" {
 		n.Meta[contracts.MetaLastSeen] = m.now().UTC().Format(time.RFC3339)
 	}
@@ -204,8 +166,6 @@ func (m *ObsidianMemory) writeNode(n contracts.Node, reloadPrior bool) error {
 			return fmt.Errorf("obsidian: mkdir for %q: %w", n.Key, err)
 		}
 	}
-	// Write to a temp sibling then rename: rename is atomic on a POSIX
-	// filesystem, so a reader (or a crash) never observes a half-written node.
 	tmp := rel + ".tmp"
 	if err := m.root.WriteFile(tmp, []byte(marshalNode(n)), 0o600); err != nil {
 		return fmt.Errorf("obsidian: write %q: %w", n.Key, err)
@@ -277,15 +237,15 @@ func (m *ObsidianMemory) Recall(ctx context.Context, key string, depth int) (con
 				child, err := m.loadUnlocked(l.To)
 				if err != nil {
 					if errors.Is(err, fs.ErrNotExist) {
-						continue // dangling link: skip, do not fail the whole recall
+						continue
 					}
 					return contracts.Subgraph{}, fmt.Errorf("obsidian: recall %q: neighbor %q: %w", key, l.To, err)
 				}
 				if child.Meta[contracts.MetaState] == contracts.StateArchived {
-					continue // archived neighbor: hide from graph expansion (root is always returned)
+					continue
 				}
 				if child.Kind == contracts.KindTranscript {
-					continue // raw G7 transcript: never surfaces via graph expansion (invisible by default, no IncludeRaw concept on Recall)
+					continue
 				}
 				sg.Nodes = append(sg.Nodes, child)
 				next = append(next, child)
@@ -317,7 +277,7 @@ func (m *ObsidianMemory) Links(ctx context.Context, from, to, rel string) error 
 	}
 	for _, l := range n.Links {
 		if l.To == to {
-			return nil // already linked
+			return nil
 		}
 	}
 	n.Links = append(n.Links, contracts.Link{To: to, Rel: rel})
@@ -355,7 +315,7 @@ func (m *ObsidianMemory) Unlink(ctx context.Context, from, to string) error {
 		kept = append(kept, l)
 	}
 	if !found {
-		return nil // no edge to `to` — no-op, no needless mtime bump
+		return nil
 	}
 	n.Links = kept
 	n.Body = exciseWikilinks(n.Body, to)
@@ -392,7 +352,7 @@ func (m *ObsidianMemory) Search(ctx context.Context, q contracts.Query) ([]contr
 			return err
 		}
 		if !d.Type().IsRegular() || !strings.HasSuffix(path, ".md") {
-			return nil // skip dirs, symlinks, and non-markdown
+			return nil
 		}
 		seen[path] = struct{}{}
 		info, err := d.Info()
@@ -447,7 +407,7 @@ func matchesQuery(n contracts.Node, q contracts.Query) bool {
 		return false
 	}
 	if n.Kind == contracts.KindTranscript && !q.IncludeRaw {
-		return false // G7 raw archival tier: hidden unless the caller opts in
+		return false
 	}
 	if len(q.Kinds) > 0 {
 		ok := false

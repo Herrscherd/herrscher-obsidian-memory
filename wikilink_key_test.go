@@ -16,7 +16,6 @@ func TestKeysAWikilinkCannotCarryAreRefused(t *testing.T) {
 			t.Errorf("validKey(%q) = nil, want a refusal", key)
 		}
 	}
-	// The rule must not widen past what it is for: these are ordinary keys.
 	for _, key := range []string{"plain", "project/herrscher", "a-b_c.d", "élan"} {
 		if err := validKey(key); err != nil {
 			t.Errorf("validKey(%q) = %v, want it accepted", key, err)

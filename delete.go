@@ -32,7 +32,7 @@ func (m *ObsidianMemory) Delete(ctx context.Context, key string) error {
 	rel := keyToRel(key)
 	if err := m.root.Remove(rel); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil // idempotent
+			return nil
 		}
 		return fmt.Errorf("obsidian: delete %q: %w", key, err)
 	}

@@ -29,7 +29,6 @@ func (m *ObsidianMemory) Locate(ctx context.Context, key string) (contracts.Loca
 	}
 	defer release()
 	rel := keyToRel(key)
-	// Existence via l'*os.Root (jamais d'évasion hors du vault).
 	f, err := m.root.Open(rel)
 	if err != nil {
 		return contracts.Location{}, fmt.Errorf("obsidian: locate %q: %w", key, err)

@@ -24,17 +24,13 @@ func EnsureVault(root string) (*ObsidianMemory, error) {
 	return m, nil
 }
 
-// ensureObsidianDir writes a minimal .obsidian/ config through the sandboxed root
-// when absent. Idempotent: a file that already exists is left untouched. The
-// files are non-markdown, so Search/Obsidian/git treat them as vault config, not
-// memory nodes.
 func (m *ObsidianMemory) ensureObsidianDir() error {
 	if err := m.root.MkdirAll(".obsidian", 0o700); err != nil {
 		return fmt.Errorf("obsidian: create .obsidian dir: %w", err)
 	}
 	for _, name := range []string{".obsidian/app.json", ".obsidian/appearance.json"} {
 		if _, err := m.root.Stat(name); err == nil {
-			continue // exists — never overwrite
+			continue
 		}
 		if err := m.root.WriteFile(name, []byte("{}\n"), 0o600); err != nil {
 			return fmt.Errorf("obsidian: write %s: %w", name, err)
@@ -44,7 +40,7 @@ func (m *ObsidianMemory) ensureObsidianDir() error {
 }
 
 // EnsureAgent ensures the private KindAgent root node at key exists, creating it
-// with title as its heading only when absent (idempotent — never overwrites an
+// with title as its heading only when absent (idempotent, it never overwrites an
 // existing node). Callers pass contracts.AgentKey(name) so the node lands exactly
 // where the orchestrator's scope will look.
 func (m *ObsidianMemory) EnsureAgent(ctx context.Context, key, title string) error {
@@ -57,6 +53,4 @@ func (m *ObsidianMemory) EnsureProject(ctx context.Context, key, title string) e
 	return m.ensure(ctx, contracts.Node{Key: key, Kind: contracts.KindProject, Title: title})
 }
 
-// Compile-time proof the vault satisfies the optional provisioning capability the
-// host type-asserts at bridge startup.
 var _ contracts.Provisioner = (*ObsidianMemory)(nil)

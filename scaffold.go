@@ -8,11 +8,6 @@ import (
 	contracts "github.com/Herrscherd/herrscher-contracts"
 )
 
-// slug canonicalizes a caller-supplied name into a vault key path segment. Names
-// enter the keyspace verbatim, so "Neublox" and "neublox" would otherwise scaffold
-// two separate scopes; folding case (and trimming surrounding space) collapses them
-// onto one canonical path. The raw name is kept for node Titles, so the human UI
-// still shows the original casing.
 func slug(name string) string {
 	return strings.ToLower(strings.TrimSpace(name))
 }
@@ -28,8 +23,6 @@ type InitSpec struct {
 	Servers []string
 }
 
-// base returns the vault path prefix for the project ("<org>/<project>" or
-// "projets/<project>").
 func (s InitSpec) base() string {
 	if s.Org != "" {
 		return slug(s.Org) + "/" + slug(s.Project)
@@ -45,7 +38,6 @@ func (m *ObsidianMemory) Init(ctx context.Context, s InitSpec) error {
 	}
 	base := s.base()
 
-	// Domain (optional, transverse): attach the project to a "domaines/<slug>" root.
 	var domainKey string
 	if s.Domain != "" {
 		domainKey = "domaines/" + slug(s.Domain) + "/index"
@@ -59,9 +51,6 @@ func (m *ObsidianMemory) Init(ctx context.Context, s InitSpec) error {
 		}); err != nil {
 			return err
 		}
-		// Append via Links (idempotent) rather than the node literal so a second
-		// project under the same org is added instead of dropped (ensure skips an
-		// existing org node, so its literal links never grow).
 		if err := m.Links(ctx, orgKey, base+"/index", "contains"); err != nil {
 			return err
 		}
@@ -72,8 +61,6 @@ func (m *ObsidianMemory) Init(ctx context.Context, s InitSpec) error {
 	if s.Org != "" {
 		projLinks = append(projLinks, contracts.Link{To: slug(s.Org) + "/index", Rel: "belongs-to"})
 	}
-	// The project node links down to every child so Recall(project) surfaces the
-	// whole spine; children also link back up (belongs-to) below.
 	projLinks = append(projLinks,
 		contracts.Link{To: base + "/architecture", Rel: "contains"},
 		contracts.Link{To: base + "/production", Rel: "contains"})
@@ -103,21 +90,19 @@ func (m *ObsidianMemory) Init(ctx context.Context, s InitSpec) error {
 		}); err != nil {
 			return err
 		}
-		// Same reason as the org contains-link above: append via Links so a domain
-		// accumulates every project attached to it, not just the first.
 		if err := m.Links(ctx, domainKey, projKey, "contains"); err != nil {
 			return err
 		}
 	}
 	if err := m.ensure(ctx, contracts.Node{
 		Key: base + "/architecture", Kind: contracts.KindArchitecture,
-		Title: s.Project + " — architecture", Links: []contracts.Link{{To: projKey, Rel: "belongs-to"}},
+		Title: s.Project + ": architecture", Links: []contracts.Link{{To: projKey, Rel: "belongs-to"}},
 	}); err != nil {
 		return err
 	}
 	if err := m.ensure(ctx, contracts.Node{
 		Key: base + "/production", Kind: contracts.KindProduction,
-		Title: s.Project + " — production", Links: []contracts.Link{{To: projKey, Rel: "belongs-to"}},
+		Title: s.Project + ": production", Links: []contracts.Link{{To: projKey, Rel: "belongs-to"}},
 	}); err != nil {
 		return err
 	}
@@ -141,8 +126,6 @@ func (m *ObsidianMemory) Init(ctx context.Context, s InitSpec) error {
 	return nil
 }
 
-// ensure Records the node only if its file does not already exist. The existence
-// check and the write are atomic under the same lock Record uses.
 func (m *ObsidianMemory) ensure(ctx context.Context, n contracts.Node) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -155,7 +138,7 @@ func (m *ObsidianMemory) ensure(ctx context.Context, n contracts.Node) error {
 	}
 	defer release()
 	if _, err := m.root.Stat(keyToRel(n.Key)); err == nil {
-		return nil // exists — never overwrite
+		return nil
 	}
 	return m.recordUnlockedNoReload(n)
 }

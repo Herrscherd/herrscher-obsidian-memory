@@ -14,8 +14,8 @@ func TestMarshalUnmarshalRoundTrip(t *testing.T) {
 		Title: "Herrscher",
 		Body:  "The modular AI harness.\n\nSee [[herrscher/repos/contracts|depends-on]].\n",
 		Links: []contracts.Link{
-			{To: "herrscher/repos/contracts", Rel: "depends-on"}, // already in body
-			{To: "herrscher/repos/gateway", Rel: "contains"},     // must be appended
+			{To: "herrscher/repos/contracts", Rel: "depends-on"},
+			{To: "herrscher/repos/gateway", Rel: "contains"},
 		},
 		Meta: map[string]string{"tags": "platform, go", "status": "active"},
 	}
@@ -38,7 +38,6 @@ func TestMarshalUnmarshalRoundTrip(t *testing.T) {
 	if len(got.Links) != 2 {
 		t.Fatalf("expected 2 links, got %d: %+v", len(got.Links), got.Links)
 	}
-	// Re-marshalling must be stable (no second "## Liens" growth).
 	if strings.Count(marshalNode(got), "## Liens") > 1 {
 		t.Fatalf("marshal is not idempotent on links section")
 	}
@@ -86,9 +85,6 @@ func TestUnmarshalNoFrontmatter(t *testing.T) {
 }
 
 func TestUnmarshalThematicBreakNotFrontmatter(t *testing.T) {
-	// A hand-authored note that opens with a markdown thematic break and has no
-	// standalone closing fence must keep all of its content in the body, not
-	// swallow it into bogus Meta keys.
 	src := "---\nHello, this is a heading-ish line\n\nA paragraph with a: colon inside.\n"
 	got := unmarshalNode("loose/note", []byte(src))
 	if got.Body != src {
@@ -100,8 +96,6 @@ func TestUnmarshalThematicBreakNotFrontmatter(t *testing.T) {
 }
 
 func TestLiensHeaderSubstringDoesNotSuppressSection(t *testing.T) {
-	// "## Liens" appearing inline in prose (not as a standalone section header)
-	// must not suppress the real trailing links section.
 	n := contracts.Node{
 		Key: "x", Kind: contracts.KindRepo,
 		Body:  "We discuss the ## Liens convention here inline.\n",
@@ -117,8 +111,6 @@ func TestLiensHeaderSubstringDoesNotSuppressSection(t *testing.T) {
 }
 
 func TestFrontmatterKeyCannotBreakOut(t *testing.T) {
-	// A Meta key carrying a newline must be single-lined so it cannot terminate
-	// the frontmatter fence or inject a second reserved field.
 	n := contracts.Node{
 		Key: "x", Kind: contracts.KindUser,
 		Meta: map[string]string{"evil\n---\nsecret": "v"},
