@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Herrscherd/herrscher-contracts"
+	contracts "github.com/Herrscherd/herrscher-contracts"
 )
 
 func newTestMem(t *testing.T) *ObsidianMemory {
@@ -110,10 +110,14 @@ func TestRecordUpsertsNoDuplicate(t *testing.T) {
 func TestRecallFollowsLinksToDepth(t *testing.T) {
 	m := newTestMem(t)
 	ctx := context.Background()
-	_ = m.Record(ctx, contracts.Node{Key: "a", Kind: contracts.KindProject,
-		Links: []contracts.Link{{To: "b", Rel: "depends-on"}}})
-	_ = m.Record(ctx, contracts.Node{Key: "b", Kind: contracts.KindRepo,
-		Links: []contracts.Link{{To: "c", Rel: "contains"}}})
+	_ = m.Record(ctx, contracts.Node{
+		Key: "a", Kind: contracts.KindProject,
+		Links: []contracts.Link{{To: "b", Rel: "depends-on"}},
+	})
+	_ = m.Record(ctx, contracts.Node{
+		Key: "b", Kind: contracts.KindRepo,
+		Links: []contracts.Link{{To: "c", Rel: "contains"}},
+	})
 	_ = m.Record(ctx, contracts.Node{Key: "c", Kind: contracts.KindRepo})
 
 	sg, err := m.Recall(ctx, "a", 1)
@@ -142,10 +146,14 @@ func TestRecallMissingKeyErrors(t *testing.T) {
 func TestSearchByKindTagText(t *testing.T) {
 	m := newTestMem(t)
 	ctx := context.Background()
-	_ = m.Record(ctx, contracts.Node{Key: "a/index", Kind: contracts.KindProject,
-		Title: "Alpha", Body: "uses NATS", Meta: map[string]string{"tags": "platform, go"}})
-	_ = m.Record(ctx, contracts.Node{Key: "dec/x", Kind: contracts.KindDecision,
-		Title: "Choose NATS", Body: "transport choice"})
+	_ = m.Record(ctx, contracts.Node{
+		Key: "a/index", Kind: contracts.KindProject,
+		Title: "Alpha", Body: "uses NATS", Meta: map[string]string{"tags": "platform, go"},
+	})
+	_ = m.Record(ctx, contracts.Node{
+		Key: "dec/x", Kind: contracts.KindDecision,
+		Title: "Choose NATS", Body: "transport choice",
+	})
 
 	byKind, _ := m.Search(ctx, contracts.Query{Kinds: []contracts.NodeKind{contracts.KindDecision}})
 	if len(byKind) != 1 || byKind[0].Key != "dec/x" {
@@ -360,8 +368,10 @@ func TestSearchIgnoresSymlinkEscape(t *testing.T) {
 func TestSearchMatchesDomainAsTag(t *testing.T) {
 	m := newTestMem(t)
 	ctx := context.Background()
-	if err := m.Record(ctx, contracts.Node{Key: "projets/x/index", Kind: contracts.KindProject,
-		Title: "X", Meta: map[string]string{"domain": "dev"}}); err != nil {
+	if err := m.Record(ctx, contracts.Node{
+		Key: "projets/x/index", Kind: contracts.KindProject,
+		Title: "X", Meta: map[string]string{"domain": "dev"},
+	}); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
 	got, err := m.Search(ctx, contracts.Query{Tags: []string{"dev"}})
@@ -541,8 +551,10 @@ func TestArchivedExclusion(t *testing.T) {
 	ctx := context.Background()
 	archived := map[string]string{contracts.MetaState: contracts.StateArchived}
 
-	if err := m.Record(ctx, contracts.Node{Key: "root", Body: "keyword root",
-		Links: []contracts.Link{{To: "old", Rel: "rel"}}}); err != nil {
+	if err := m.Record(ctx, contracts.Node{
+		Key: "root", Body: "keyword root",
+		Links: []contracts.Link{{To: "old", Rel: "rel"}},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.Record(ctx, contracts.Node{Key: "old", Body: "keyword old", Meta: archived}); err != nil {
@@ -602,12 +614,16 @@ func TestRecallHidesTranscriptNeighbor(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	if err := m.Record(ctx, contracts.Node{Key: "root",
-		Links: []contracts.Link{{To: "raw/s/e-1", Rel: "captured"}}}); err != nil {
+	if err := m.Record(ctx, contracts.Node{
+		Key:   "root",
+		Links: []contracts.Link{{To: "raw/s/e-1", Rel: "captured"}},
+	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.Record(ctx, contracts.Node{Key: "raw/s/e-1", Kind: contracts.KindTranscript,
-		Body: "attacker-controlled transcript body"}); err != nil {
+	if err := m.Record(ctx, contracts.Node{
+		Key: "raw/s/e-1", Kind: contracts.KindTranscript,
+		Body: "attacker-controlled transcript body",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	sg, err := m.Recall(ctx, "root", 1)

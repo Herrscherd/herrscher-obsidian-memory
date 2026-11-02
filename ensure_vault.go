@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Herrscherd/herrscher-contracts"
+	contracts "github.com/Herrscherd/herrscher-contracts"
 )
 
 // EnsureVault opens (creating if absent) the vault at root and additionally

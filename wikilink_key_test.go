@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Herrscherd/herrscher-contracts"
+	contracts "github.com/Herrscherd/herrscher-contracts"
 )
 
 // A key is written into other notes as `[[key]]` and read back by a regexp, so a

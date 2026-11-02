@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Herrscherd/herrscher-contracts"
+	contracts "github.com/Herrscherd/herrscher-contracts"
 )
 
 func TestMarshalUnmarshalRoundTrip(t *testing.T) {
@@ -65,8 +65,10 @@ func TestFrontmatterValuesCannotBreakOut(t *testing.T) {
 
 func TestReRecordDoesNotDuplicateLiensHeader(t *testing.T) {
 	body := "hi\n\n" + liensHeader + "\n- [[a|r]]\n"
-	n := contracts.Node{Key: "x", Kind: contracts.KindRepo, Body: body,
-		Links: []contracts.Link{{To: "a", Rel: "r"}, {To: "b", Rel: "q"}}}
+	n := contracts.Node{
+		Key: "x", Kind: contracts.KindRepo, Body: body,
+		Links: []contracts.Link{{To: "a", Rel: "r"}, {To: "b", Rel: "q"}},
+	}
 	out := marshalNode(n)
 	if strings.Count(out, liensHeader) != 1 {
 		t.Fatalf("duplicate links header:\n%s", out)
@@ -100,9 +102,11 @@ func TestUnmarshalThematicBreakNotFrontmatter(t *testing.T) {
 func TestLiensHeaderSubstringDoesNotSuppressSection(t *testing.T) {
 	// "## Liens" appearing inline in prose (not as a standalone section header)
 	// must not suppress the real trailing links section.
-	n := contracts.Node{Key: "x", Kind: contracts.KindRepo,
+	n := contracts.Node{
+		Key: "x", Kind: contracts.KindRepo,
 		Body:  "We discuss the ## Liens convention here inline.\n",
-		Links: []contracts.Link{{To: "a", Rel: "r"}}}
+		Links: []contracts.Link{{To: "a", Rel: "r"}},
+	}
 	out := marshalNode(n)
 	if !liensHeaderRe.MatchString(out[strings.Index(out, "\n---\n")+5:]) {
 		t.Fatalf("standalone Liens header not written:\n%s", out)
@@ -115,8 +119,10 @@ func TestLiensHeaderSubstringDoesNotSuppressSection(t *testing.T) {
 func TestFrontmatterKeyCannotBreakOut(t *testing.T) {
 	// A Meta key carrying a newline must be single-lined so it cannot terminate
 	// the frontmatter fence or inject a second reserved field.
-	n := contracts.Node{Key: "x", Kind: contracts.KindUser,
-		Meta: map[string]string{"evil\n---\nsecret": "v"}}
+	n := contracts.Node{
+		Key: "x", Kind: contracts.KindUser,
+		Meta: map[string]string{"evil\n---\nsecret": "v"},
+	}
 	got := unmarshalNode("x", []byte(marshalNode(n)))
 	if got.Kind != contracts.KindUser {
 		t.Fatalf("kind hijacked via key injection: %s", got.Kind)

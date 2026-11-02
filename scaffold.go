@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Herrscherd/herrscher-contracts"
+	contracts "github.com/Herrscherd/herrscher-contracts"
 )
 
 // slug canonicalizes a caller-supplied name into a vault key path segment. Names
@@ -53,8 +53,10 @@ func (m *ObsidianMemory) Init(ctx context.Context, s InitSpec) error {
 
 	if s.Org != "" {
 		orgKey := slug(s.Org) + "/index"
-		if err := m.ensure(ctx, contracts.Node{Key: orgKey, Kind: contracts.KindOrganization,
-			Title: s.Org}); err != nil {
+		if err := m.ensure(ctx, contracts.Node{
+			Key: orgKey, Kind: contracts.KindOrganization,
+			Title: s.Org,
+		}); err != nil {
 			return err
 		}
 		// Append via Links (idempotent) rather than the node literal so a second
@@ -84,8 +86,10 @@ func (m *ObsidianMemory) Init(ctx context.Context, s InitSpec) error {
 	if domainKey != "" {
 		projLinks = append(projLinks, contracts.Link{To: domainKey, Rel: "in-domain"})
 	}
-	projNode := contracts.Node{Key: projKey, Kind: contracts.KindProject,
-		Title: s.Project, Links: projLinks}
+	projNode := contracts.Node{
+		Key: projKey, Kind: contracts.KindProject,
+		Title: s.Project, Links: projLinks,
+	}
 	if s.Domain != "" {
 		projNode.Meta = map[string]string{"domain": s.Domain}
 	}
@@ -93,8 +97,10 @@ func (m *ObsidianMemory) Init(ctx context.Context, s InitSpec) error {
 		return err
 	}
 	if domainKey != "" {
-		if err := m.ensure(ctx, contracts.Node{Key: domainKey, Kind: contracts.KindDomain,
-			Title: s.Domain}); err != nil {
+		if err := m.ensure(ctx, contracts.Node{
+			Key: domainKey, Kind: contracts.KindDomain,
+			Title: s.Domain,
+		}); err != nil {
 			return err
 		}
 		// Same reason as the org contains-link above: append via Links so a domain
@@ -103,24 +109,32 @@ func (m *ObsidianMemory) Init(ctx context.Context, s InitSpec) error {
 			return err
 		}
 	}
-	if err := m.ensure(ctx, contracts.Node{Key: base + "/architecture", Kind: contracts.KindArchitecture,
-		Title: s.Project + " — architecture", Links: []contracts.Link{{To: projKey, Rel: "belongs-to"}}}); err != nil {
+	if err := m.ensure(ctx, contracts.Node{
+		Key: base + "/architecture", Kind: contracts.KindArchitecture,
+		Title: s.Project + " — architecture", Links: []contracts.Link{{To: projKey, Rel: "belongs-to"}},
+	}); err != nil {
 		return err
 	}
-	if err := m.ensure(ctx, contracts.Node{Key: base + "/production", Kind: contracts.KindProduction,
-		Title: s.Project + " — production", Links: []contracts.Link{{To: projKey, Rel: "belongs-to"}}}); err != nil {
+	if err := m.ensure(ctx, contracts.Node{
+		Key: base + "/production", Kind: contracts.KindProduction,
+		Title: s.Project + " — production", Links: []contracts.Link{{To: projKey, Rel: "belongs-to"}},
+	}); err != nil {
 		return err
 	}
 
 	for _, r := range s.Repos {
-		if err := m.ensure(ctx, contracts.Node{Key: base + "/repos/" + slug(r), Kind: contracts.KindRepo,
-			Title: r, Links: []contracts.Link{{To: projKey, Rel: "belongs-to"}}}); err != nil {
+		if err := m.ensure(ctx, contracts.Node{
+			Key: base + "/repos/" + slug(r), Kind: contracts.KindRepo,
+			Title: r, Links: []contracts.Link{{To: projKey, Rel: "belongs-to"}},
+		}); err != nil {
 			return err
 		}
 	}
 	for _, sv := range s.Servers {
-		if err := m.ensure(ctx, contracts.Node{Key: base + "/servers/" + slug(sv), Kind: contracts.KindServer,
-			Title: sv, Links: []contracts.Link{{To: projKey, Rel: "belongs-to"}}}); err != nil {
+		if err := m.ensure(ctx, contracts.Node{
+			Key: base + "/servers/" + slug(sv), Kind: contracts.KindServer,
+			Title: sv, Links: []contracts.Link{{To: projKey, Rel: "belongs-to"}},
+		}); err != nil {
 			return err
 		}
 	}

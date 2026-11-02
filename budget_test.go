@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	contracts "github.com/Herrscherd/herrscher-contracts"
+
 	obsidian "github.com/Herrscherd/herrscher-obsidian-memory"
 )
 
