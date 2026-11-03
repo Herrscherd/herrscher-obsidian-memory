@@ -11,9 +11,10 @@ import (
 
 func findPlugin(t *testing.T) contracts.Plugin {
 	t.Helper()
-	for _, p := range contracts.Default.Memories() {
-		if p.Manifest.Kind == "obsidian" {
-			return p
+	plugins := contracts.Default.Memories()
+	for index := range plugins {
+		if plugins[index].Manifest.Kind == "obsidian" {
+			return plugins[index]
 		}
 	}
 	t.Fatal("obsidian memory plugin not registered")
